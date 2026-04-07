@@ -1,5 +1,6 @@
 package client;
 
+import gui.CustomUI;
 import gui.GameUI;
 import gui.HeadlessUI;   // swap to CustomUI (or any GameUI impl) to change the UI
 import shared.Config;
@@ -24,7 +25,7 @@ public class Client {
     public static void main(String[] args) throws Exception {
 
         // ── SWAP THIS LINE TO CHANGE THE GUI ─────────────────────────── //
-        GameUI ui = new HeadlessUI();
+        GameUI ui = new CustomUI();
         // ─────────────────────────────────────────────────────────────── //
 
         String defaultIp = Config.get("server.ip");

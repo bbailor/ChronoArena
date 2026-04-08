@@ -4,6 +4,7 @@ import gui.CustomUI;
 import gui.GameUI;
 import gui.HeadlessUI;   // swap to CustomUI (or any GameUI impl) to change the UI
 import shared.Config;
+import gui.SwingUI;
 import shared.Messages.*;
 
 import java.io.*;
@@ -25,7 +26,8 @@ public class Client {
     public static void main(String[] args) throws Exception {
 
         // ── SWAP THIS LINE TO CHANGE THE GUI ─────────────────────────── //
-        GameUI ui = new CustomUI();
+        // GameUI ui = new CustomUI();
+        GameUI ui = new SwingUI();
         // ─────────────────────────────────────────────────────────────── //
 
         String defaultIp = Config.get("server.ip");

@@ -47,7 +47,18 @@ public class Server {
         new Thread(() -> runKillSwitch(clientManager), "KillSwitch").start();
 
         // TCP listener (blocks, accepts new clients)
-        ServerSocket tcpServer = new ServerSocket(tcpPort);
+        // SO_REUSEADDR lets us restart immediately without waiting for TIME_WAIT to expire
+        ServerSocket tcpServer = new ServerSocket();
+        tcpServer.setReuseAddress(true);
+        tcpServer.bind(new java.net.InetSocketAddress(tcpPort));
+
+        // Clean shutdown hook: close sockets so ports are released on Ctrl+C or crash
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            System.out.println("[Server] Shutting down...");
+            try { tcpServer.close(); } catch (IOException ignored) {}
+            udpReceiver.stop();
+        }, "ShutdownHook"));
+
         System.out.println("[Server] Ready. Waiting for players...");
         while (true) {
             Socket client = tcpServer.accept();

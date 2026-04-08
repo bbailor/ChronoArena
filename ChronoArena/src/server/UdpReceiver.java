@@ -32,7 +32,11 @@ public class UdpReceiver implements Runnable {
 
     public UdpReceiver(ConcurrentLinkedQueue<PlayerAction> actionQueue) throws SocketException {
         int port    = Config.getInt("server.udp.port");
-        this.socket = new DatagramSocket(port);
+        // SO_REUSEADDR lets us restart immediately without "Address already in use"
+        DatagramSocket ds = new DatagramSocket(null);
+        ds.setReuseAddress(true);
+        ds.bind(new java.net.InetSocketAddress(port));
+        this.socket = ds;
         // One thread per CPU core for deserializing packets
         this.workers     = Executors.newFixedThreadPool(
                 Math.max(2, Runtime.getRuntime().availableProcessors()));

@@ -6,58 +6,17 @@ import javax.swing.*;
 import java.awt.*;
 import java.awt.event.*;
 import java.util.*;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicReference;
 
 import shared.Messages.*;
 
-/**
- * CustomUI — your blank canvas for building any GUI you want.
- *
- * This class already implements GameUI so it compiles and runs immediately.
- * Every method has a TODO comment explaining what to put there.
- *
- * QUICK START
- * ───────────
- * 1. Fill in the methods below with your rendering/input code
- * 2. In Client.java, change:
- *        GameUI ui = new HeadlessUI();
- *    to:
- *        GameUI ui = new CustomUI();
- * 3. Recompile (./build.sh) and run
- *
- * COMMON PATTERNS
- * ───────────────
- * Swing:
- *   - Keep a JFrame field; call frame.setVisible(true) in onGameStart()
- *   - Call SwingUtilities.invokeLater(() -> panel.repaint()) in onStateUpdate()
- *   - Store the latest snapshot in a volatile field so paintComponent() can read it
- *   - Use a Set<Integer> of held key codes + a javax.swing.Timer for smooth movement
- *
- * JavaFX:
- *   - Launch your Application from onGameStart()
- *   - Use Platform.runLater(() -> ...) in onStateUpdate()
- *
- * Terminal (e.g. Lanterna):
- *   - Build a TextGUI; update character cells in onStateUpdate()
- *
- * Web / REST bridge:
- *   - Start an embedded HTTP server in onGameStart()
- *   - Push snapshots via WebSocket in onStateUpdate()
- */
 public class CustomUI implements GameUI {
 
-    // Example for Swing:
-    //   private JFrame frame;
-    //   private GamePanel panel;          // your custom JPanel subclass
-    //   private volatile GameStateSnapshot latestSnapshot;
-    //   private final Set<Integer> heldKeys = new HashSet<>();
-    //   private volatile ActionType pendingAction = ActionType.NONE;
-
-    // The latest snapshot from the server - volatile so the EDT reads fresh data
     private volatile GameStateSnapshot latestSnapshot;
     private String myPlayerId;
 
-    // Key state - track which keys are held for smooth movement
+    // Key state
     private final Set<Integer> heldKeys = Collections.synchronizedSet(new HashSet<>());
 
     // Pending one-shot action (freeze ray) - consumed once per press
@@ -67,14 +26,24 @@ public class CustomUI implements GameUI {
     private JFrame frame;
     private ArenaPanel arenaPanel;
 
+    // ---- Notification system ----
+    private static class Notification {
+        final String text;
+        final Color  color;
+        final long   expireMs;
+        Notification(String text, Color color, long durationMs) {
+            this.text     = text;
+            this.color    = color;
+            this.expireMs = System.currentTimeMillis() + durationMs;
+        }
+    }
+    private final CopyOnWriteArrayList<Notification> notifications = new CopyOnWriteArrayList<>();
+    private volatile boolean wasFrozen = false;
+
     // ------------------------------------------------------------------ //
     //  Lifecycle
     // ------------------------------------------------------------------ //
 
-    /**
-     * Called once after a successful join.
-     * Show your main game window / start your render loop here.
-     */
     @Override
     public void onGameStart(String myPlayerId, String playerName) {
         this.myPlayerId = myPlayerId;
@@ -86,15 +55,15 @@ public class CustomUI implements GameUI {
             arenaPanel = new ArenaPanel();
             frame.add(arenaPanel, BorderLayout.CENTER);
 
-            // Key bindings attached to the frame
             frame.addKeyListener(new KeyAdapter() {
                 @Override
                 public void keyPressed(KeyEvent e) {
                     heldKeys.add(e.getKeyCode());
-
-                    // One-shot actions on key press (not held)
                     if (e.getKeyCode() == KeyEvent.VK_SPACE) {
                         pendingAction.set(ActionType.FREEZE_RAY);
+                    }
+                    if (e.getKeyCode() == KeyEvent.VK_ESCAPE) {
+                        System.exit(0);
                     }
                 }
                 @Override
@@ -111,41 +80,27 @@ public class CustomUI implements GameUI {
         });
     }
 
-    /**
-     * Called every server tick (~20 Hz). This is your repaint trigger.
-     * The snapshot contains everything: player positions, zone states, items, scores.
-     *
-     * IMPORTANT: if using Swing, do NOT paint directly here (wrong thread).
-     * Store the snapshot and call SwingUtilities.invokeLater(() -> panel.repaint()).
-     */
-    // @Override
-    // public void onStateUpdate(GameStateSnapshot snapshot) {
-    //     // TODO: store snapshot and trigger a redraw
-    //     //
-    //     // Swing example:
-    //     //   latestSnapshot = snapshot;
-    //     //   SwingUtilities.invokeLater(() -> panel.repaint());
-    //     //
-    //     // The snapshot fields you'll use most in paintComponent():
-    //     //   snapshot.players        — List<PlayerInfo>  x, y, id, name, frozen, hasWeapon, score
-    //     //   snapshot.zones          — List<ZoneInfo>    x, y, width, height, ownerPlayerId, contested, captureProgress
-    //     //   snapshot.items          — List<ItemInfo>    x, y, isWeapon
-    //     //   snapshot.scores         — Map<String,Integer>  playerId → score
-    //     //   snapshot.roundTimeRemainingMs
-    // }
-
-        @Override
+    @Override
     public void onStateUpdate(GameStateSnapshot snapshot) {
-        latestSnapshot = snapshot;   // store (volatile - thread safe)
+        // Detect freeze event for local player → show notification
+        if (myPlayerId != null && snapshot.players != null) {
+            for (PlayerInfo p : snapshot.players) {
+                if (p.id.equals(myPlayerId)) {
+                    if (p.frozen && !wasFrozen) {
+                        notifications.add(new Notification("TAGGED!  −10 PTS", Color.RED, 2500));
+                    }
+                    wasFrozen = p.frozen;
+                    break;
+                }
+            }
+        }
+
+        latestSnapshot = snapshot;
         if (arenaPanel != null) {
-            // Schedule repaint on the EDT - never paint from the TCP thread
             SwingUtilities.invokeLater(arenaPanel::repaint);
         }
     }
 
-    /**
-     * Called when the round ends. Show a leaderboard / end screen.
-     */
     @Override
     public void onRoundEnd(String winnerId, Map<String, Integer> scores,
                             List<PlayerInfo> players) {
@@ -157,7 +112,8 @@ public class CustomUI implements GameUI {
                     String name = players.stream()
                         .filter(p -> p.id.equals(e.getKey()))
                         .map(p -> p.name).findFirst().orElse(e.getKey());
-                    sb.append(String.format("%-12s %d pts\n", name, e.getValue()));
+                    String marker = e.getKey().equals(winnerId) ? " ★" : "";
+                    sb.append(String.format("%-14s %d pts%s\n", name, e.getValue(), marker));
                 });
             JOptionPane.showMessageDialog(frame, sb.toString(), "Final Scores",
                     JOptionPane.INFORMATION_MESSAGE);
@@ -165,9 +121,6 @@ public class CustomUI implements GameUI {
         });
     }
 
-    /**
-     * Called when the server admin kills this client.
-     */
     @Override
     public void onKilled() {
         SwingUtilities.invokeLater(() -> {
@@ -177,10 +130,6 @@ public class CustomUI implements GameUI {
         });
     }
 
-
-    /**
-     * Called when the TCP connection drops unexpectedly.
-     */
     @Override
     public void onDisconnected() {
         SwingUtilities.invokeLater(() -> {
@@ -194,45 +143,15 @@ public class CustomUI implements GameUI {
     //  Input
     // ------------------------------------------------------------------ //
 
-    /**
-     * Called by a background thread every ~50 ms. Return the player's current action.
-     * Must be non-blocking and thread-safe.
-     *
-     * Swing keyboard example — store held keys in a Set, compute action here:
-     *
-     *   private final Set<Integer> heldKeys = Collections.synchronizedSet(new HashSet<>());
-     *   // In your KeyListener:
-     *   //   keyPressed  → heldKeys.add(e.getKeyCode())
-     *   //   keyReleased → heldKeys.remove(e.getKeyCode())
-     *
-     *   @Override public ActionType getNextAction() {
-     *       boolean up    = heldKeys.contains(KeyEvent.VK_W);
-     *       boolean down  = heldKeys.contains(KeyEvent.VK_S);
-     *       boolean left  = heldKeys.contains(KeyEvent.VK_A);
-     *       boolean right = heldKeys.contains(KeyEvent.VK_D);
-     *       if (up && left)  return ActionType.MOVE_UL;
-     *       if (up && right) return ActionType.MOVE_UR;
-     *       if (up)          return ActionType.MOVE_UP;
-     *       // ... etc
-     *       if (heldKeys.contains(KeyEvent.VK_SPACE)) return ActionType.FREEZE_RAY;
-     *       return ActionType.NONE;
-     *   }
-     */
-  @Override
+    @Override
     public ActionType getNextAction() {
-        // Check for one-shot actions first (freeze ray)
         ActionType oneShot = pendingAction.getAndSet(ActionType.NONE);
         if (oneShot != ActionType.NONE) return oneShot;
 
-        // Then check held movement keys
-        boolean up    = heldKeys.contains(KeyEvent.VK_W) ||
-                        heldKeys.contains(KeyEvent.VK_UP);
-        boolean down  = heldKeys.contains(KeyEvent.VK_S) ||
-                        heldKeys.contains(KeyEvent.VK_DOWN);
-        boolean left  = heldKeys.contains(KeyEvent.VK_A) ||
-                        heldKeys.contains(KeyEvent.VK_LEFT);
-        boolean right = heldKeys.contains(KeyEvent.VK_D) ||
-                        heldKeys.contains(KeyEvent.VK_RIGHT);
+        boolean up    = heldKeys.contains(KeyEvent.VK_W) || heldKeys.contains(KeyEvent.VK_UP);
+        boolean down  = heldKeys.contains(KeyEvent.VK_S) || heldKeys.contains(KeyEvent.VK_DOWN);
+        boolean left  = heldKeys.contains(KeyEvent.VK_A) || heldKeys.contains(KeyEvent.VK_LEFT);
+        boolean right = heldKeys.contains(KeyEvent.VK_D) || heldKeys.contains(KeyEvent.VK_RIGHT);
 
         if (up   && left)  return ActionType.MOVE_UL;
         if (up   && right) return ActionType.MOVE_UR;
@@ -252,12 +171,6 @@ public class CustomUI implements GameUI {
     private String enteredName = "Player";
     private String enteredIp   = null;
 
-    /**
-     * Called before connecting. Return the player name, or null to cancel.
-     * You can show a splash screen/dialog here, or just return a fixed string.
-     *
-     * @param defaultServerIp  the IP from game.properties (show as a hint)
-     */
     @Override
     public String promptPlayerName(String defaultServerIp) {
         JTextField nameField = new JTextField("Player", 15);
@@ -275,19 +188,31 @@ public class CustomUI implements GameUI {
         return enteredName.isEmpty() ? "Player" : enteredName;
     }
 
-    /**
-     * Return a server IP override entered in the lobby screen, or null to use game.properties.
-     * Only called after promptPlayerName() has returned.
-     */
     @Override
     public String getServerIpOverride() { return enteredIp; }
 
+
+    // ------------------------------------------------------------------ //
+    //  Arena Panel
+    // ------------------------------------------------------------------ //
 
     class ArenaPanel extends JPanel {
 
         static final int ARENA_W = 800;
         static final int ARENA_H = 600;
         static final int HUD_H   = 60;
+
+        // 8 distinct player colors
+        private final Color[] PLAYER_COLORS = {
+            new Color(30,  120, 220),   // blue
+            new Color(220,  50,  50),   // red
+            new Color(50,  190,  70),   // green
+            new Color(210, 160,   0),   // gold
+            new Color(180,  60, 200),   // purple
+            new Color(0,   200, 200),   // teal
+            new Color(230, 120,  20),   // orange
+            new Color(220, 220,  50),   // yellow
+        };
 
         ArenaPanel() {
             setPreferredSize(new Dimension(ARENA_W, ARENA_H + HUD_H));
@@ -300,128 +225,304 @@ public class CustomUI implements GameUI {
             GameStateSnapshot snap = latestSnapshot;
             if (snap == null) {
                 g.setColor(Color.WHITE);
-                g.drawString("Waiting for server...", 20, 20);
+                g.setFont(new Font("Monospaced", Font.BOLD, 16));
+                g.drawString("Waiting for server...", 20, 40);
                 return;
             }
 
             Graphics2D g2 = (Graphics2D) g;
             g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
                                 RenderingHints.VALUE_ANTIALIAS_ON);
+            g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING,
+                                RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
 
-            drawHUD(g2, snap);
-            drawZones(g2, snap);
+            // Build stable color map (same order each frame)
+            Map<String, Color> playerColors = buildColorMap(snap);
+
+            drawHUD(g2, snap, playerColors);
+            drawZones(g2, snap, playerColors);
             drawItems(g2, snap);
-            drawPlayers(g2, snap);
+            drawPlayers(g2, snap, playerColors);
+            drawNotifications(g2);
         }
 
-        private void drawHUD(Graphics2D g, GameStateSnapshot snap) {
-            g.setColor(Color.BLACK);
+        /** Assign a stable color to each player by insertion order. */
+        private Map<String, Color> buildColorMap(GameStateSnapshot snap) {
+            Map<String, Color> map = new LinkedHashMap<>();
+            int i = 0;
+            for (PlayerInfo p : snap.players) {
+                map.put(p.id, PLAYER_COLORS[i++ % PLAYER_COLORS.length]);
+            }
+            return map;
+        }
+
+        // ---- HUD ----
+
+        private void drawHUD(Graphics2D g, GameStateSnapshot snap,
+                             Map<String, Color> playerColors) {
+            // Background
+            g.setColor(new Color(15, 15, 15));
             g.fillRect(0, 0, getWidth(), HUD_H);
+            g.setColor(new Color(60, 60, 60));
+            g.drawLine(0, HUD_H - 1, getWidth(), HUD_H - 1);
+
+            // Title
+            g.setFont(new Font("Monospaced", Font.BOLD, 16));
+            g.setColor(new Color(255, 200, 0));
+            g.drawString("CHRONOARENA", 10, 22);
 
             // Timer
             long sec = snap.roundTimeRemainingMs / 1000;
-            g.setColor(Color.YELLOW);
+            String timeStr = String.format("TIME  %02d:%02d", sec / 60, sec % 60);
             g.setFont(new Font("Monospaced", Font.BOLD, 20));
-            g.drawString(String.format("TIME  %02d:%02d", sec / 60, sec % 60), 20, 35);
+            g.setColor(sec <= 30 ? Color.RED : Color.WHITE);
+            FontMetrics fm = g.getFontMetrics();
+            int timeX = (getWidth() - fm.stringWidth(timeStr)) / 2;
+            g.drawString(timeStr, timeX, 38);
 
-            // Scores — sorted highest first
-            int x = 200;
-            snap.scores.entrySet().stream()
-                .sorted(Map.Entry.<String, Integer>comparingByValue().reversed())
-                .forEach(e -> {
-                    // Highlight your own score
-                });
-            // (fill in score rendering here)
+            // Scores — sorted highest first, drawn right-aligned
+            List<Map.Entry<String, Integer>> sorted = new ArrayList<>(snap.scores.entrySet());
+            sorted.sort(Map.Entry.<String, Integer>comparingByValue().reversed());
+
+            // Build name lookup
+            Map<String, String> nameMap = new HashMap<>();
+            for (PlayerInfo p : snap.players) nameMap.put(p.id, p.name);
+
+            int scoreX = getWidth() - 10;
+            g.setFont(new Font("Monospaced", Font.BOLD, 13));
+            for (Map.Entry<String, Integer> e : sorted) {
+                String label = String.format("%s: %d",
+                    nameMap.getOrDefault(e.getKey(), e.getKey()), e.getValue());
+                FontMetrics sfm = g.getFontMetrics();
+                scoreX -= sfm.stringWidth(label) + 14;
+
+                // Colored box behind own score
+                Color pc = playerColors.getOrDefault(e.getKey(), Color.GRAY);
+                if (e.getKey().equals(myPlayerId)) {
+                    g.setColor(pc);
+                    g.fillRoundRect(scoreX - 4, 8, sfm.stringWidth(label) + 8, 22, 6, 6);
+                    g.setColor(Color.WHITE);
+                } else {
+                    g.setColor(pc.darker());
+                    g.fillRoundRect(scoreX - 4, 8, sfm.stringWidth(label) + 8, 22, 6, 6);
+                    g.setColor(new Color(220, 220, 220));
+                }
+                g.drawString(label, scoreX, 24);
+            }
+
+            // ESC hint
+            g.setFont(new Font("Monospaced", Font.PLAIN, 10));
+            g.setColor(new Color(120, 120, 120));
+            g.drawString("[ESC] quit  [WASD] move  [SPACE] freeze", 10, HUD_H - 8);
         }
 
-        private void drawZones(Graphics2D g, GameStateSnapshot snap) {
+        // ---- Zones ----
+
+        private void drawZones(Graphics2D g, GameStateSnapshot snap,
+                               Map<String, Color> playerColors) {
+            Map<String, String> nameMap = new HashMap<>();
+            for (PlayerInfo p : snap.players) nameMap.put(p.id, p.name);
+
             for (ZoneInfo z : snap.zones) {
-                // Fill color based on state
+                int zy = z.y + HUD_H;
+
+                // Fill
+                Color fill;
                 if (z.contested) {
-                    g.setColor(new Color(200, 100, 0, 80));
+                    fill = new Color(200, 100, 0, 90);
                 } else if (z.ownerPlayerId != null) {
-                    g.setColor(new Color(0, 180, 80, 80));
+                    Color pc = playerColors.getOrDefault(z.ownerPlayerId, Color.GREEN);
+                    fill = new Color(pc.getRed(), pc.getGreen(), pc.getBlue(), 60);
                 } else {
-                    g.setColor(new Color(100, 100, 100, 60));
+                    fill = new Color(80, 80, 80, 60);
                 }
-                g.fillRect(z.x, z.y + HUD_H, z.width, z.height);
+                g.setColor(fill);
+                g.fillRect(z.x, zy, z.width, z.height);
 
                 // Border
-                g.setColor(z.contested ? Color.ORANGE :
-                           z.ownerPlayerId != null ? Color.GREEN : Color.GRAY);
-                g.drawRect(z.x, z.y + HUD_H, z.width, z.height);
+                Color border;
+                if (z.contested) {
+                    border = Color.ORANGE;
+                } else if (z.ownerPlayerId != null) {
+                    border = playerColors.getOrDefault(z.ownerPlayerId, Color.GREEN);
+                } else {
+                    border = new Color(150, 150, 150);
+                }
+                g.setColor(border);
+                Stroke prev = g.getStroke();
+                g.setStroke(new BasicStroke(z.contested ? 2.5f : 1.5f));
+                g.drawRect(z.x, zy, z.width, z.height);
+                g.setStroke(prev);
 
-                // Label
-                g.setColor(Color.WHITE);
+                // Zone ID label (top-left)
                 g.setFont(new Font("Monospaced", Font.BOLD, 13));
-                g.drawString("ZONE " + z.id, z.x + 6, z.y + HUD_H + 18);
-                g.drawString(z.contested ? "CONTESTED" :
-                             z.ownerPlayerId != null ? "OWNED" : "FREE",
-                             z.x + 6, z.y + HUD_H + 34);
+                g.setColor(Color.WHITE);
+                g.drawString("ZONE " + z.id, z.x + 6, zy + 18);
+
+                // Status label (second line)
+                String statusLabel;
+                Color statusColor;
+                if (z.contested) {
+                    statusLabel = "CONTESTED";
+                    statusColor = Color.ORANGE;
+                } else if (z.ownerPlayerId != null) {
+                    String ownerName = nameMap.getOrDefault(z.ownerPlayerId, z.ownerPlayerId);
+                    statusLabel = "CONTROLLED";
+                    statusColor = playerColors.getOrDefault(z.ownerPlayerId, Color.GREEN).brighter();
+                    // Owner name on third line
+                    g.setFont(new Font("Monospaced", Font.PLAIN, 11));
+                    g.setColor(statusColor);
+                    g.drawString(ownerName, z.x + 6, zy + 48);
+                } else {
+                    statusLabel = "UNCLAIMED";
+                    statusColor = new Color(180, 180, 180);
+                }
+                g.setFont(new Font("Monospaced", Font.BOLD, 12));
+                g.setColor(statusColor);
+                g.drawString(statusLabel, z.x + 6, zy + 34);
+
+                // Grace timer indicator
+                if (z.graceExpiresMs > 0 && z.ownerPlayerId != null) {
+                    long remaining = z.graceExpiresMs - System.currentTimeMillis();
+                    if (remaining > 0) {
+                        g.setFont(new Font("Monospaced", Font.PLAIN, 10));
+                        g.setColor(new Color(255, 200, 0));
+                        g.drawString(String.format("grace %.1fs", remaining / 1000.0),
+                                     z.x + 6, zy + z.height - 14);
+                    }
+                }
 
                 // Capture progress bar along bottom of zone
                 if (z.captureProgress > 0 && z.captureProgress < 1.0) {
-                    g.setColor(Color.YELLOW);
-                    g.fillRect(z.x, z.y + HUD_H + z.height - 5,
-                               (int)(z.width * z.captureProgress), 5);
+                    // Background track
+                    g.setColor(new Color(0, 0, 0, 100));
+                    g.fillRect(z.x, zy + z.height - 6, z.width, 6);
+                    // Progress fill
+                    g.setColor(new Color(255, 220, 0));
+                    g.fillRect(z.x, zy + z.height - 6,
+                               (int)(z.width * z.captureProgress), 6);
                 }
             }
         }
+
+        // ---- Items ----
 
         private void drawItems(Graphics2D g, GameStateSnapshot snap) {
             for (ItemInfo item : snap.items) {
+                int ix = item.x;
                 int iy = item.y + HUD_H;
                 if (item.isWeapon) {
-                    g.setColor(Color.CYAN);
-                    g.fillOval(item.x - 10, iy - 10, 20, 20);
+                    // Weapon: cyan circle with snowflake/ICE label
+                    g.setColor(new Color(0, 220, 255, 200));
+                    g.fillOval(ix - 11, iy - 11, 22, 22);
+                    g.setColor(new Color(0, 100, 150));
+                    g.drawOval(ix - 11, iy - 11, 22, 22);
                     g.setColor(Color.WHITE);
                     g.setFont(new Font("Monospaced", Font.BOLD, 9));
-                    g.drawString("ICE", item.x - 8, iy + 4);
+                    g.drawString("❄", ix - 5, iy + 4);
                 } else {
-                    g.setColor(Color.YELLOW);
-                    g.fillOval(item.x - 10, iy - 10, 20, 20);
+                    // Energy coin: gold circle with $ symbol
+                    g.setColor(new Color(255, 215, 0, 220));
+                    g.fillOval(ix - 10, iy - 10, 20, 20);
+                    g.setColor(new Color(180, 140, 0));
+                    g.drawOval(ix - 10, iy - 10, 20, 20);
+                    g.setColor(new Color(100, 70, 0));
+                    g.setFont(new Font("Monospaced", Font.BOLD, 11));
+                    g.drawString("★", ix - 6, iy + 5);
                 }
             }
         }
 
-        private void drawPlayers(Graphics2D g, GameStateSnapshot snap) {
-            Color[] colors = {
-                new Color(0, 120, 220), new Color(220, 60, 60),
-                new Color(60, 180, 60), new Color(200, 160, 0)
-            };
-            int colorIdx = 0;
-            Map<String, Color> playerColors = new LinkedHashMap<>();
-            for (PlayerInfo p : snap.players) {
-                playerColors.put(p.id, colors[colorIdx++ % colors.length]);
-            }
+        // ---- Players ----
 
+        private void drawPlayers(Graphics2D g, GameStateSnapshot snap,
+                                 Map<String, Color> playerColors) {
             for (PlayerInfo p : snap.players) {
+                int px = p.x;
                 int py = p.y + HUD_H;
-                Color c = playerColors.get(p.id);
+                boolean isMe = p.id.equals(myPlayerId);
+                Color c = playerColors.getOrDefault(p.id, Color.GRAY);
 
-                // Frozen ring
+                // Frozen aura — bright blue glow
                 if (p.frozen) {
-                    g.setColor(new Color(100, 200, 255, 100));
-                    g.fillOval(p.x - 18, py - 18, 36, 36);
+                    g.setColor(new Color(100, 180, 255, 80));
+                    g.fillOval(px - 20, py - 20, 40, 40);
+                    g.setColor(new Color(100, 200, 255, 160));
+                    g.fillOval(px - 16, py - 16, 32, 32);
                 }
 
-                // Player circle — brighter if it's you
-                g.setColor(p.id.equals(myPlayerId) ? c.brighter() : c);
-                g.fillOval(p.x - 12, py - 12, 24, 24);
-                g.setColor(Color.WHITE);
-                g.drawOval(p.x - 12, py - 12, 24, 24);
+                // Player body circle
+                g.setColor(isMe ? c.brighter() : c);
+                g.fillOval(px - 12, py - 12, 24, 24);
 
-                // Name
+                // Border: white for self, darker shade for others
+                g.setColor(isMe ? Color.WHITE : c.darker());
+                Stroke prev = g.getStroke();
+                g.setStroke(new BasicStroke(isMe ? 2.5f : 1.5f));
+                g.drawOval(px - 12, py - 12, 24, 24);
+                g.setStroke(prev);
+
+                // Weapon indicator: small cyan dot on top-right of circle
+                if (p.hasWeapon) {
+                    g.setColor(new Color(0, 220, 255));
+                    g.fillOval(px + 4, py - 18, 10, 10);
+                    g.setColor(Color.WHITE);
+                    g.setFont(new Font("Monospaced", Font.BOLD, 7));
+                    g.drawString("❄", px + 5, py - 10);
+                }
+
+                // "FROZEN" label above frozen players
+                if (p.frozen) {
+                    g.setFont(new Font("Monospaced", Font.BOLD, 10));
+                    g.setColor(new Color(100, 200, 255));
+                    FontMetrics fm = g.getFontMetrics();
+                    String frozenLabel = "FROZEN";
+                    g.drawString(frozenLabel, px - fm.stringWidth(frozenLabel) / 2, py - 22);
+                }
+
+                // Name label (above player, or "YOU" for self)
                 g.setFont(new Font("Monospaced", Font.BOLD, 11));
                 g.setColor(Color.WHITE);
-                g.drawString(p.id.equals(myPlayerId) ? "YOU" : p.name,
-                             p.x - 10, py - 15);
+                String nameLabel = isMe ? "YOU" : p.name;
+                FontMetrics nfm = g.getFontMetrics();
+                int nameOffset = p.frozen ? 34 : 22;
+                g.drawString(nameLabel, px - nfm.stringWidth(nameLabel) / 2, py - nameOffset);
 
-                // Score above player
+                // Score below player
                 g.setFont(new Font("Monospaced", Font.PLAIN, 10));
-                g.drawString(String.valueOf(p.score), p.x - 6, py - 26);
+                g.setColor(new Color(200, 200, 200));
+                String scoreStr = String.valueOf(p.score);
+                FontMetrics sfm = g.getFontMetrics();
+                g.drawString(scoreStr, px - sfm.stringWidth(scoreStr) / 2, py + 22);
+            }
+        }
+
+        // ---- Notifications (TAGGED! etc.) ----
+
+        private void drawNotifications(Graphics2D g) {
+            long now = System.currentTimeMillis();
+            // Purge expired
+            notifications.removeIf(n -> now > n.expireMs);
+
+            int ny = getHeight() / 2 - 20;
+            for (Notification n : notifications) {
+                long remaining = n.expireMs - now;
+                float alpha = Math.min(1f, remaining / 400f); // fade out last 400ms
+                Color c = new Color(n.color.getRed(), n.color.getGreen(),
+                                    n.color.getBlue(), (int)(alpha * 220));
+
+                g.setFont(new Font("Monospaced", Font.BOLD, 28));
+                FontMetrics fm = g.getFontMetrics();
+                int nx = (getWidth() - fm.stringWidth(n.text)) / 2;
+
+                // Shadow
+                g.setColor(new Color(0, 0, 0, (int)(alpha * 180)));
+                g.drawString(n.text, nx + 2, ny + 2);
+
+                g.setColor(c);
+                g.drawString(n.text, nx, ny);
+                ny += 38;
             }
         }
     }
 }
-

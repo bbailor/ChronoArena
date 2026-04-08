@@ -2,6 +2,7 @@ package gui;
 
 import shared.Messages.*;
 
+import javax.imageio.ImageIO;
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.*;
@@ -86,7 +87,11 @@ public class SwingUI implements GameUI {
 
     // ── Notification overlay (freeze hit, tagged, etc.) ───────────────
     private volatile String  notification     = null;
-    private volatile long    notifyExpiresMs  = 0;
+    private volatile long notifyExpiresMs = 0;
+    
+    // Sprites
+    private BufferedImage blueSprite;
+    private BufferedImage redSprite;
 
     // ═══════════════════════════════════════════════════════════════════
     //  GameUI — Lifecycle
@@ -244,6 +249,8 @@ public class SwingUI implements GameUI {
     // ═══════════════════════════════════════════════════════════════════
 
     private void buildFrame() {
+        loadSprites();
+
         frame = new JFrame("ChronoArena");
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         frame.setLayout(new BorderLayout(0, 0));
@@ -310,13 +317,16 @@ public class SwingUI implements GameUI {
 
     private void updateHUD() {
         GameStateSnapshot snap = currentSnap;
-        if (snap == null) return;
+        if (snap == null)
+            return;
 
         long sec = snap.roundTimeRemainingMs / 1000;
         String timeStr = String.format("%02d:%02d", sec / 60, sec % 60);
         timerLabel.setText(timeStr);
-        if (sec <= 30) timerLabel.setForeground(ACCENT2);
-        else           timerLabel.setForeground(TEXT_MAIN);
+        if (sec <= 30)
+            timerLabel.setForeground(ACCENT2);
+        else
+            timerLabel.setForeground(TEXT_MAIN);
 
         // Rebuild score badges
         scorePanel.removeAll();
@@ -327,13 +337,28 @@ public class SwingUI implements GameUI {
                 Color c = playerColor(p.id);
                 JLabel badge = styled(p.name + "  " + p.score, 13, Font.BOLD, c);
                 badge.setBorder(BorderFactory.createCompoundBorder(
-                    BorderFactory.createLineBorder(c.darker(), 1),
-                    BorderFactory.createEmptyBorder(2, 8, 2, 8)));
+                        BorderFactory.createLineBorder(c.darker(), 1),
+                        BorderFactory.createEmptyBorder(2, 8, 2, 8)));
                 scorePanel.add(badge);
             }
         }
         scorePanel.revalidate();
         scorePanel.repaint();
+    }
+    
+    private void loadSprites() {
+    try {
+        blueSprite = ImageIO.read(
+            getClass().getResource("/BlueGuy.png")
+        );
+
+        redSprite = ImageIO.read(
+            getClass().getResource("/RedGuy.png")
+        );
+
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -510,7 +535,25 @@ public class SwingUI implements GameUI {
 
                 // Body fill
                 g2.setColor(c);
-                g2.fillOval(p.x - PLAYER_R, p.y - PLAYER_R, PLAYER_R * 2, PLAYER_R * 2);
+
+                // g2.fillOval(p.x - PLAYER_R, p.y - PLAYER_R, PLAYER_R * 2, PLAYER_R * 2);
+
+                BufferedImage sprite;
+
+                if (p.id.equals(myPlayerId)) {
+                    sprite = blueSprite;   // you are blue
+                } else {
+                    sprite = redSprite;    // others are red
+                }
+
+                g2.drawImage(
+                    sprite,
+                    p.x - PLAYER_R,
+                    p.y - PLAYER_R,
+                    PLAYER_R * 2,
+                    PLAYER_R * 2,
+                    null
+                );
 
                 // Outline — thicker for self
                 g2.setColor(isMe ? Color.WHITE : c.brighter());

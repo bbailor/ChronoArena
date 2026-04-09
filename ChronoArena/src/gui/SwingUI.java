@@ -88,6 +88,7 @@ public class SwingUI implements GameUI {
     // ── Notification overlay (freeze hit, tagged, etc.) ───────────────
     private volatile String  notification     = null;
     private volatile long notifyExpiresMs = 0;
+    private volatile boolean wasFrozen = false;
     
     // Sprites
     private BufferedImage blueSprite;
@@ -119,15 +120,15 @@ public class SwingUI implements GameUI {
         }
         currentSnap = snapshot;
 
-        // Check if we were just frozen and show notification
+        // Detect the exact moment we become frozen and show notification once
         if (snapshot.players != null) {
             for (PlayerInfo p : snapshot.players) {
-                if (p.id.equals(myPlayerId) && p.frozen
-                        && System.currentTimeMillis() < notifyExpiresMs - 1500) {
-                    // already notified
-                } else if (p.id.equals(myPlayerId) && p.frozen
-                        && System.currentTimeMillis() >= notifyExpiresMs) {
-                    showNotification("❄  FROZEN!", 2500);
+                if (p.id.equals(myPlayerId)) {
+                    if (p.frozen && !wasFrozen) {
+                        showNotification("TAGGED!  −10 PTS", 2500);
+                    }
+                    wasFrozen = p.frozen;
+                    break;
                 }
             }
         }

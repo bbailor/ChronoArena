@@ -9,6 +9,8 @@ import java.net.Socket;
 import java.util.Scanner;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
+import javax.swing.SwingUtilities;
+
 /**
  * Server entry point.
  *
@@ -45,6 +47,15 @@ public class Server {
 
         // Kill-switch console thread
         new Thread(() -> runKillSwitch(clientManager), "KillSwitch").start();
+
+        // ── Optional: launch the server admin GUI ────────────────────
+        // Comment this block out to run the server headless.
+        final GameState     gsRef  = gameState;
+        final ClientManager cmRef  = clientManager;
+        SwingUtilities.invokeLater(() -> {
+            ServerGUI serverGui = new ServerGUI(gsRef, cmRef);
+            serverGui.setVisible(true);
+        });
 
         // TCP listener (blocks, accepts new clients)
         // SO_REUSEADDR lets us restart immediately without waiting for TIME_WAIT to expire

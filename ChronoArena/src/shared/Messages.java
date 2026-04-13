@@ -142,7 +142,8 @@ public class Messages {
         public List<PlayerInfo>     players;
         public List<ZoneInfo>       zones;
         public List<ItemInfo>       items;
-        public Map<String, Integer> scores; // playerId → score
+        public Map<String, Integer> scores;          // playerId → score
+        public List<FreezeBeamInfo> beams;           // active freeze-ray visuals
     }
 
     public static class PlayerInfo implements Serializable {
@@ -174,5 +175,13 @@ public class Messages {
         public boolean isWeapon;     // true = freeze weapon
         public boolean isSpeedBoost; // true = speed boost (isWeapon must be false)
         public boolean isScoreSteal; // true = score steal weapon
+        public long    despawnAtMs;  // epoch ms when this item disappears
+    }
+
+    /** Short-lived freeze-ray beam drawn by the client for visual feedback */
+    public static class FreezeBeamInfo implements Serializable {
+        public int  fromX, fromY; // attacker centre
+        public int  toX,   toY;  // target centre
+        public long expiresAtMs; // epoch ms when the beam stops being drawn
     }
 }

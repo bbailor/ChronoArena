@@ -32,10 +32,13 @@ public class GameLoop implements Runnable {
     // For duplicate UDP detection: track last processed seq per player
     private final Map<String, Long> lastSeqProcessed = new HashMap<>();
 
-    // Item spawning
-    private int  itemCounter        = 0;
-    private long lastItemSpawnMs    = 0;
+    // Item spawning / lifecycle
+    private int  itemCounter           = 0;
+    private long lastItemSpawnMs       = 0;
     private long ITEM_SPAWN_INTERVAL_MS;
+    private static final int  MAX_ITEMS        = 10;          // cap on simultaneous items
+    private static final long ITEM_DESPAWN_MS  = 15_000L;     // items vanish after 15 s
+    private static final long BEAM_DURATION_MS = 600L;        // freeze-ray beam visible for 600 ms
 
     // Arena bounds (match GUI)
     static final int ARENA_W = 800;
@@ -124,11 +127,13 @@ public class GameLoop implements Runnable {
         // 2. Update zone capture timers and award zone points
         updateZones();
 
-        // 3. Spawn items periodically
+        // 3. Spawn items periodically; expire old ones
+        expireItems();
         maybeSpawnItem();
 
-        // 4. Unfreeze players / restore speed when timers expire
+        // 4. Unfreeze players / restore speed when timers expire; clean up beams
         updateFreezeTimers();
+        expireBeams();
 
         // 5. Broadcast authoritative state to all clients
         clientManager.broadcastState(state.snapshot());
@@ -223,9 +228,13 @@ public class GameLoop implements Runnable {
         }
 
         if (target != null) {
-            target.frozenUntilMs = System.currentTimeMillis() + state.FREEZE_DURATION_MS;
+            long now             = System.currentTimeMillis();
+            target.frozenUntilMs = now + state.FREEZE_DURATION_MS;
             target.score         = Math.max(0, target.score - state.TAG_PENALTY);
             attacker.hasWeapon   = false;
+            // Record a visual beam so clients can draw it
+            state.activeBeams.add(new GameState.FreezeBeam(
+                attacker.x, attacker.y, target.x, target.y, now + BEAM_DURATION_MS));
             System.out.println("[GameLoop] " + attacker.name + " froze " + target.name);
         }
     }
@@ -355,16 +364,27 @@ public class GameLoop implements Runnable {
     // ------------------------------------------------------------------ //
     private final Random rng = new Random();
 
+    private void expireItems() {
+        long now = System.currentTimeMillis();
+        state.items.entrySet().removeIf(e -> e.getValue().despawnAtMs <= now);
+    }
+
+    private void expireBeams() {
+        long now = System.currentTimeMillis();
+        state.activeBeams.removeIf(b -> b.expiresAtMs <= now);
+    }
+
     private void maybeSpawnItem() {
         long now = System.currentTimeMillis();
         if (now - lastItemSpawnMs < ITEM_SPAWN_INTERVAL_MS) return;
+        if (state.items.size() >= MAX_ITEMS) return; // cap reached
         lastItemSpawnMs = now;
 
         int    x    = rng.nextInt(ARENA_W - 40) + 20;
         int    y    = rng.nextInt(ARENA_H - 40) + 20;
         String id   = "item-" + (++itemCounter);
 
-        int    type          = rng.nextInt(4);
+        int     type         = rng.nextInt(4);
         boolean isWeapon     = (type == 0);
         boolean isSpeedBoost = (type == 1);
         boolean isScoreSteal = (type == 2);
@@ -374,7 +394,8 @@ public class GameLoop implements Runnable {
                              : isScoreSteal ? "score-steal"
                              : "energy";
 
-        state.items.put(id, new GameState.Item(id, x, y, isWeapon, isSpeedBoost, isScoreSteal));
+        state.items.put(id, new GameState.Item(
+            id, x, y, isWeapon, isSpeedBoost, isScoreSteal, now + ITEM_DESPAWN_MS));
         System.out.println("[GameLoop] Spawned " + kindName + " at (" + x + "," + y + ")");
     }
 

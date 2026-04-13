@@ -65,9 +65,12 @@ public class Config {
         props.setProperty("zone.capture.time.ms",    "2000");
         props.setProperty("item.spawn.interval.ms",  "8000");
         props.setProperty("points.per.zone.tick",    "2");
-        props.setProperty("item.energy.value",       "10");
-        props.setProperty("item.weapon.value",       "0");
-        props.setProperty("tag.penalty.points",      "10");
+        props.setProperty("item.energy.value",          "10");
+        props.setProperty("item.weapon.value",          "0");
+        props.setProperty("tag.penalty.points",         "10");
+        props.setProperty("score.steal.amount",         "15");
+        props.setProperty("speed.boost.duration.ms",    "5000");
+        props.setProperty("speed.boost.multiplier",     "2");
     }
 
     public static String get(String key) {

@@ -5,6 +5,7 @@ import shared.Messages.*;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * Authoritative game state - only mutated by the game loop thread.
@@ -21,6 +22,9 @@ public class GameState {
 
     // --- Items ---
     final Map<String, Item> items = new ConcurrentHashMap<>();
+
+    // --- Freeze-ray beams (short-lived, for client visuals) ---
+    final List<FreezeBeam> activeBeams = new CopyOnWriteArrayList<>();
 
     // --- Round timing ---
     long roundStartMs;
@@ -62,10 +66,25 @@ public class GameState {
     }
 
     private void initZones() {
-        // Three zones on the map - positions match the GUI constants
-        zones.add(new Zone("A",  80, 100, 120, 120));
-        zones.add(new Zone("B", 320, 100, 120, 120));
-        zones.add(new Zone("C", 560, 100, 120, 120));
+        // Randomly place one zone in each of the three vertical columns so
+        // every part of the 800x600 arena is strategically relevant.
+        Random rng   = new Random();
+        int zoneW    = 120, zoneH = 120;
+        int margin   = 50;
+        int colW     = 800 / 3; // ~266 px per column
+
+        for (int col = 0; col < 3; col++) {
+            int minX = col * colW + margin;
+            int maxX = (col + 1) * colW - zoneW - margin;
+            if (maxX <= minX) maxX = minX + 1;
+            int x = minX + rng.nextInt(maxX - minX);
+            int y = margin + rng.nextInt(600 - zoneH - margin * 2);
+            zones.add(new Zone(String.valueOf((char) ('A' + col)), x, y, zoneW, zoneH));
+        }
+        System.out.println("[GameState] Zones randomised: "
+            + zones.get(0).x + "," + zones.get(0).y + "  "
+            + zones.get(1).x + "," + zones.get(1).y + "  "
+            + zones.get(2).x + "," + zones.get(2).y);
     }
 
     long timeRemainingMs() {
@@ -122,7 +141,22 @@ public class GameState {
             ii.isWeapon       = item.isWeapon;
             ii.isSpeedBoost   = item.isSpeedBoost;
             ii.isScoreSteal   = item.isScoreSteal;
+            ii.despawnAtMs    = item.despawnAtMs;
             snap.items.add(ii);
+        }
+
+        long now = System.currentTimeMillis();
+        snap.beams = new ArrayList<>();
+        for (FreezeBeam beam : activeBeams) {
+            if (beam.expiresAtMs > now) {
+                FreezeBeamInfo bi = new FreezeBeamInfo();
+                bi.fromX       = beam.fromX;
+                bi.fromY       = beam.fromY;
+                bi.toX         = beam.toX;
+                bi.toY         = beam.toY;
+                bi.expiresAtMs = beam.expiresAtMs;
+                snap.beams.add(bi);
+            }
         }
 
         return snap;
@@ -199,14 +233,32 @@ public class GameState {
         final boolean isWeapon;
         final boolean isSpeedBoost;
         final boolean isScoreSteal;
+        final long    despawnAtMs; // epoch ms when this item expires
 
-        Item(String id, int x, int y, boolean isWeapon, boolean isSpeedBoost, boolean isScoreSteal) {
+        Item(String id, int x, int y, boolean isWeapon, boolean isSpeedBoost,
+             boolean isScoreSteal, long despawnAtMs) {
             this.id           = id;
             this.x            = x;
             this.y            = y;
             this.isWeapon     = isWeapon;
             this.isSpeedBoost = isSpeedBoost;
             this.isScoreSteal = isScoreSteal;
+            this.despawnAtMs  = despawnAtMs;
+        }
+    }
+
+    /** Short-lived beam created when a freeze ray fires (server-side record). */
+    static class FreezeBeam {
+        final int  fromX, fromY;
+        final int  toX,   toY;
+        final long expiresAtMs;
+
+        FreezeBeam(int fromX, int fromY, int toX, int toY, long expiresAtMs) {
+            this.fromX       = fromX;
+            this.fromY       = fromY;
+            this.toX         = toX;
+            this.toY         = toY;
+            this.expiresAtMs = expiresAtMs;
         }
     }
 }

@@ -1,0 +1,9 @@
+# Compiled output
+ChronoArena/out/
+
+# macOS
+.DS_Store
+
+# IntelliJ / IDE
+.idea/
+*.iml

@@ -515,12 +515,14 @@ public class SwingUI implements GameUI {
         startButton.setFont(new Font("Monospaced", Font.BOLD, 15));
         startButton.setForeground(BG_DARK);
         startButton.setBackground(ACCENT);
+        startButton.setOpaque(true);
+        startButton.setContentAreaFilled(true);
         startButton.setBorderPainted(false);
         startButton.setFocusPainted(false);
         startButton.setFocusable(false);
         startButton.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         startButton.setPreferredSize(new Dimension(200, 42));
-        startButton.setVisible(false);
+        startButton.setEnabled(false); // enabled only for host
         startButton.addActionListener(e -> {
             startButton.setEnabled(false);
             startButton.setText("Starting...");
@@ -558,8 +560,8 @@ public class SwingUI implements GameUI {
         boolean amHost = myPlayerId != null && myPlayerId.equals(state.hostPlayerId);
         isHost = amHost;
         setConfigEditable(amHost);
-        startButton.setVisible(amHost);
-
+        startButton.setEnabled(amHost);
+        startButton.setBackground(amHost ? ACCENT : TEXT_DIM);
         if (amHost) {
             lobbyStatusLabel.setText("You are the host. Configure and press Start.");
             lobbyStatusLabel.setForeground(ACCENT);
@@ -570,6 +572,13 @@ public class SwingUI implements GameUI {
 
         if (state.config != null && configSpinners != null)
             syncSpinnersFromConfig(state.config);
+
+        // Re-lay out the frame so the start button appears correctly when
+        // visibility changes (frame was packed before the button was visible)
+        if (frame != null) {
+            frame.revalidate();
+            frame.repaint();
+        }
     }
 
     /** Builds a player row with a color dot and, for the local player, a color picker. */
@@ -848,6 +857,7 @@ public class SwingUI implements GameUI {
 
             drawZones(g2, snap);
             drawItems(g2, snap);
+            drawBeams(g2, snap.beams);
             drawPlayers(g2, snap);
             drawNotifications(g2);
         }
@@ -943,35 +953,40 @@ public class SwingUI implements GameUI {
             if (snap.items == null) return;
             long now = System.currentTimeMillis();
             for (ItemInfo item : snap.items) {
-                float pulse = 0.5f + 0.5f * (float) Math.sin(now / 300.0 + item.x);
+                // Fade out during the last 3 seconds of the item's lifespan
+                float itemAlpha = 1f;
+                if (item.despawnAtMs > 0) {
+                    long remaining = item.despawnAtMs - now;
+                    if (remaining <= 0) continue;
+                    if (remaining < 3000) itemAlpha = Math.max(0.1f, remaining / 3000f);
+                }
 
-                 Color base  = item.isWeapon ? WEAPON_CLR
+                float pulse = 0.5f + 0.5f * (float) Math.sin(now / 300.0 + item.x);
+                Color base  = item.isWeapon ? WEAPON_CLR
                            : item.isSpeedBoost ? SPEED_CLR
                            : item.isScoreSteal ? SCORE_STEAL_CLR
-                                         : ENERGY_CLR;
-                           
+                           : ENERGY_CLR;
+
                 String icon = item.isWeapon ? "\u2744"
                            : item.isSpeedBoost ? "\u25b6"
                            : item.isScoreSteal ? "\u2620"
-                                        : "\u26a1";
-                           
+                           : "\u26a1";
+
                 // Radial glow
                 RadialGradientPaint glow = new RadialGradientPaint(
                     new Point2D.Float(item.x, item.y), ITEM_R * 2.5f,
                     new float[]{0f, 1f},
-                    new Color[]{
-                        new Color(base.getRed(), base.getGreen(), base.getBlue(), (int)(120 * pulse)),
-                        new Color(base.getRed(), base.getGreen(), base.getBlue(), 0)
-                    });
+                    new Color[]{new Color(base.getRed(), base.getGreen(), base.getBlue(), (int)(120 * pulse * itemAlpha)),
+                                new Color(base.getRed(), base.getGreen(), base.getBlue(), 0)});
                 g2.setPaint(glow);
                 g2.fillOval(item.x - ITEM_R * 2, item.y - ITEM_R * 2, ITEM_R * 4, ITEM_R * 4);
 
                 // Solid circle
-                g2.setColor(base);
+                g2.setColor(new Color(base.getRed(), base.getGreen(), base.getBlue(), (int)(255 * itemAlpha)));
                 g2.fillOval(item.x - ITEM_R, item.y - ITEM_R, ITEM_R * 2, ITEM_R * 2);
 
                 // Icon centred in circle
-                g2.setPaint(BG_DARK);
+                g2.setColor(new Color(BG_DARK.getRed(), BG_DARK.getGreen(), BG_DARK.getBlue(), (int)(255 * itemAlpha)));
                 g2.setFont(new Font("Dialog", Font.BOLD, 10));
                 FontMetrics fm = g2.getFontMetrics();
                 g2.drawString(icon, item.x - fm.stringWidth(icon) / 2,
@@ -979,8 +994,32 @@ public class SwingUI implements GameUI {
             }
         }
 
-        // ── Players — sprite or color-aware circle fallback ───────────
+        // ── Freeze-ray beam ───────────────────────────────────────────
+        private void drawBeams(Graphics2D g2, List<FreezeBeamInfo> beams) {
+            if (beams == null) return;
+            long now = System.currentTimeMillis();
+            for (FreezeBeamInfo beam : beams) {
+                long remaining = beam.expiresAtMs - now;
+                if (remaining <= 0) continue;
+                float alpha = Math.min(1f, remaining / 200f); // fade out in last 200 ms
 
+                // Outer soft glow
+                g2.setStroke(new BasicStroke(7f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                g2.setColor(new Color(FROZEN_CLR.getRed(), FROZEN_CLR.getGreen(),
+                                      FROZEN_CLR.getBlue(), (int)(50 * alpha)));
+                g2.drawLine(beam.fromX, beam.fromY, beam.toX, beam.toY);
+
+                // Inner bright beam
+                g2.setStroke(new BasicStroke(2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                g2.setColor(new Color(FROZEN_CLR.getRed(), FROZEN_CLR.getGreen(),
+                                      FROZEN_CLR.getBlue(), (int)(210 * alpha)));
+                g2.drawLine(beam.fromX, beam.fromY, beam.toX, beam.toY);
+
+                g2.setStroke(new BasicStroke(1.5f));
+            }
+        }
+
+        // ── Players — sprite or color-aware circle fallback ───────────
         private void drawPlayers(Graphics2D g2, GameStateSnapshot snap) {
             if (snap.players == null) return;
 

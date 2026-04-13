@@ -19,28 +19,27 @@ import java.util.*;
 import java.util.List;
 
 /**
- * ServerGUI — Admin monitor for ChronoArena.
+ * serverGUI — admin monitor for ChronoArena.
  *
- * Shows:
- *   - Live mini-map of the arena (player positions, zones, items)
- *   - Player table: ID, name, score, frozen status, weapon, position
- *   - Round timer and tick counter
- *   - Kill-switch buttons per player
- *   - Console log panel (mirrors server stdout)
- *   - Zone ownership summary
+ * contains:
+ *   - live mini-map of the arena (player positions, zones, items)
+ *   - player table: ID, name, score, frozen status, weapon, position
+ *   - round timer and tick counter
+ *   - kill-switch buttons per player
+ *   - console log panel (mirrors server stdout)
+ *   - zone ownership summary
  *
- * Threading: repainted by a Swing Timer on the EDT.
- * GameLoop calls updateSnapshot() from its own thread — safe because
- * snapshot is written atomically via volatile.
+ * threading: repainted by a Swing Timer on the EDT.
+ * GameLoop calls updateSnapshot() from its own thread
  *
- * Usage in Server.java:
- *   ServerGUI gui = new ServerGUI(gameState, clientManager);
+ * usage in Server.java:
+ *   serverGUI gui = new serverGUI(gameState, clientManager);
  *   gui.setVisible(true);
  *   // Then start a Swing Timer to call gui.refresh() at ~10 Hz
  */
 public class ServerGUI extends JFrame {
 
-    // ── Colours (dark admin theme) ────────────────────────────────────
+    // ── colors (of GUI) ────────────────────────────────────
     private static final Color BG          = new Color(0x12121f);
     private static final Color PANEL_BG    = new Color(0x1a1a2e);
     private static final Color ACCENT      = new Color(0x00e5ff);
@@ -55,16 +54,16 @@ public class ServerGUI extends JFrame {
         new Color(0xd4e157), new Color(0xff7043)
     };
 
-    // ── Arena display constants ───────────────────────────────────────
+    // ── arena display constants ───────────────────────────────────────
     private static final int MAP_W = 400;  // mini-map width  (half of 800)
     private static final int MAP_H = 300;  // mini-map height (half of 600)
     private static final double SCALE = 0.5;
 
-    // ── Server references ─────────────────────────────────────────────
+    // ── server references ─────────────────────────────────────────────
     private final GameState     gameState;
     private final ClientManager clientManager;
 
-    // ── Swing components ──────────────────────────────────────────────
+    // ── swing elements ──────────────────────────────────────────────
     private MiniMapPanel       miniMap;
     private DefaultTableModel  playerTableModel;
     private JTable             playerTable;
@@ -74,10 +73,10 @@ public class ServerGUI extends JFrame {
     private JPanel             zonePanel;
     private JPanel             killButtonPanel;
 
-    // ── Snapshot (written by any thread, read by EDT) ─────────────────
+
     private volatile GameStateSnapshot latestSnap;
 
-    // ── Color assignment ──────────────────────────────────────────────
+    // ── color assignment ──────────────────────────────────────────────
     private final Map<String, Integer> colorMap   = new LinkedHashMap<>();
     private int                        colorIndex = 0;
 
@@ -87,24 +86,24 @@ public class ServerGUI extends JFrame {
         this.gameState     = gameState;
         this.clientManager = clientManager;
 
-        setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE); // don't kill server on close
+        setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE); // server not shut off on close
         addWindowListener(new WindowAdapter() {
             @Override public void windowClosing(WindowEvent e) {
-                setVisible(false); // just hide, keep server running
+                setVisible(false); // not showing, keeps server running
             }
         });
         getContentPane().setBackground(BG);
         setLayout(new BorderLayout(8, 8));
         getRootPane().setBorder(new EmptyBorder(8, 8, 8, 8));
 
-        // ── Top bar ───────────────────────────────────────────────────
-        // Initialize labels before buildTopBar() so it can place existing refs
+        // ── top bar ───────────────────────────────────────────────────
+        // initialize labels before buildTopBar() to place existing refs
         tickLabel  = label("Tick: 0", 13, Font.PLAIN, TEXT_DIM);
         timerLabel = label("03:00",   20, Font.BOLD,  TEXT);
         JPanel topBar = buildTopBar();
         add(topBar, BorderLayout.NORTH);
 
-        // ── Centre: mini-map + player table ───────────────────────────
+        // ── centre: mini-map & player table ───────────────────────────
         JPanel centre = new JPanel(new BorderLayout(8, 0));
         centre.setBackground(BG);
 
@@ -135,7 +134,7 @@ public class ServerGUI extends JFrame {
         centre.add(rightCentre, BorderLayout.CENTER);
         add(centre, BorderLayout.CENTER);
 
-        // ── Bottom: zone summary + log ────────────────────────────────
+        // ── bottom: zone summary & log ────────────────────────────────
         JPanel bottom = new JPanel(new BorderLayout(8, 0));
         bottom.setBackground(BG);
 
@@ -168,28 +167,25 @@ public class ServerGUI extends JFrame {
         setLocationRelativeTo(null);
         setResizable(true);
 
-        // ── Refresh timer: 10 Hz is plenty for an admin view ──────────
+        // ── refresh timer: 10 Hz  ──────────
         new javax.swing.Timer(100, e -> refresh()).start();
 
-        // ── Redirect System.out to the log panel ──────────────────────
+
         redirectStdout();
     }
 
-    // ─────────────────────────────────────────────────────────────────
-    //  Public API
-    // ─────────────────────────────────────────────────────────────────
 
-    /** Called by GameLoop (or a Swing Timer) to push a new snapshot. */
+    /** called by gameloop to push a new snapshot. */
     public void updateSnapshot(GameStateSnapshot snap) {
-        latestSnap = snap; // volatile write — safe from any thread
+        latestSnap = snap; 
     }
 
-    /** Called by the refresh timer on the EDT to repaint everything. */
+    /** called by refresh timer on the EDT to repaint everything */
     public void refresh() {
         GameStateSnapshot snap = latestSnap;
-        if (snap == null) snap = gameState.snapshot(); // fall back to live state
+        if (snap == null) snap = gameState.snapshot(); //  back to live state
 
-        // Assign stable colours
+        // assign colours
         if (snap.players != null) {
             for (PlayerInfo p : snap.players) {
                 colorMap.computeIfAbsent(p.id, k -> colorIndex++ % P_COLORS.length);
@@ -204,17 +200,12 @@ public class ServerGUI extends JFrame {
         miniMap.repaint();
     }
 
-    /** Append a line to the server log panel. Thread-safe. */
     public void log(String line) {
         SwingUtilities.invokeLater(() -> {
             logArea.append(line + "\n");
             logArea.setCaretPosition(logArea.getDocument().getLength());
         });
     }
-
-    // ─────────────────────────────────────────────────────────────────
-    //  Build helpers
-    // ─────────────────────────────────────────────────────────────────
 
     private JPanel buildTopBar() {
         JPanel bar = new JPanel(new BorderLayout());
@@ -227,7 +218,6 @@ public class ServerGUI extends JFrame {
         JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 16, 0));
         right.setOpaque(false);
 
-        // tickLabel and timerLabel are already initialized in the constructor
         right.add(tickLabel);
         right.add(timerLabel);
         bar.add(right, BorderLayout.EAST);
@@ -255,10 +245,7 @@ public class ServerGUI extends JFrame {
         t.setShowVerticalLines(false);
     }
 
-    // ─────────────────────────────────────────────────────────────────
-    //  Refresh helpers
-    // ─────────────────────────────────────────────────────────────────
-
+  
     private void updateTimerBar(GameStateSnapshot snap) {
         long sec = snap.roundTimeRemainingMs / 1000;
         timerLabel.setText(String.format("%02d:%02d", sec / 60, sec % 60));
@@ -270,7 +257,7 @@ public class ServerGUI extends JFrame {
         playerTableModel.setRowCount(0);
         if (snap.players == null) return;
 
-        // Find zone owner map
+        // find zone owner map
         Map<String, String> playerZone = new HashMap<>();
         if (snap.zones != null) {
             for (ZoneInfo z : snap.zones) {
@@ -349,7 +336,7 @@ public class ServerGUI extends JFrame {
     private void updateKillButtons() {
         Set<String> connected = clientManager.getConnectedPlayerIds();
 
-        // Remove buttons for players no longer connected
+        // remove buttons for players no longer connected
         Set<String> existing = new HashSet<>();
         for (Component c : killButtonPanel.getComponents()) {
             if (c instanceof JButton btn) {
@@ -361,7 +348,7 @@ public class ServerGUI extends JFrame {
             }
         }
 
-        // Add buttons for new players
+        // add buttons for new players
         for (String pid : connected) {
             if (!existing.contains(pid)) {
                 JButton btn = new JButton("KILL " + pid);
@@ -388,7 +375,7 @@ public class ServerGUI extends JFrame {
     }
 
     // ─────────────────────────────────────────────────────────────────
-    //  Mini-map panel
+    //  mini-map 
     // ─────────────────────────────────────────────────────────────────
 
     private class MiniMapPanel extends JPanel {
@@ -415,13 +402,13 @@ public class ServerGUI extends JFrame {
                 return;
             }
 
-            // Grid
+            // grid
             g2.setColor(new Color(0x1a1a33));
             g2.setStroke(new BasicStroke(0.5f));
             for (int x = 0; x <= MAP_W; x += 20) g2.drawLine(x, 0, x, MAP_H);
             for (int y = 0; y <= MAP_H; y += 20) g2.drawLine(0, y, MAP_W, y);
 
-            // Zones
+            // zones
             if (s.zones != null) {
                 for (ZoneInfo z : s.zones) {
                     int zx = (int)(z.x * SCALE), zy = (int)(z.y * SCALE);
@@ -449,7 +436,7 @@ public class ServerGUI extends JFrame {
                 }
             }
 
-            // Items
+            // items
             if (s.items != null) {
                 for (ItemInfo item : s.items) {
                     int ix = (int)(item.x * SCALE), iy = (int)(item.y * SCALE);
@@ -458,7 +445,7 @@ public class ServerGUI extends JFrame {
                 }
             }
 
-            // Players
+            // players
             if (s.players != null) {
                 for (PlayerInfo p : s.players) {
                     int px = (int)(p.x * SCALE), py = (int)(p.y * SCALE);
@@ -469,28 +456,20 @@ public class ServerGUI extends JFrame {
                     g2.setStroke(new BasicStroke(1.2f));
                     g2.drawOval(px - 5, py - 5, 10, 10);
 
-                    // Name tag
+                    // name tag
                     g2.setFont(new Font("Monospaced", Font.BOLD, 8));
                     g2.setColor(c.brighter());
                     g2.drawString(p.id, px + 6, py - 2);
                 }
             }
 
-            // Legend
+            // legend
             g2.setFont(new Font("Monospaced", Font.PLAIN, 9));
             g2.setColor(TEXT_DIM);
             g2.drawString("Mini-map  (1:2 scale)", 4, MAP_H - 4);
         }
     }
 
-    // ─────────────────────────────────────────────────────────────────
-    //  Stdout redirect
-    // ─────────────────────────────────────────────────────────────────
-
-    /**
-     * Tees System.out so every println also appears in the GUI log panel.
-     * Call once during construction.
-     */
   private void redirectStdout() {
     PrintStream original = System.out;
 
@@ -499,7 +478,6 @@ public class ServerGUI extends JFrame {
 
         @Override
         public void write(int b) throws IOException {
-            // Write to the original stream first so the terminal stays live
             original.write(b);
             
             char c = (char) b;
@@ -514,11 +492,9 @@ public class ServerGUI extends JFrame {
 
         @Override
         public void write(byte[] b, int off, int len) throws IOException {
-            // Avoid calling write(int) in a loop for better performance
             original.write(b, off, len);
             String str = new String(b, off, len);
             
-            // Handle multiple lines in a single write buffer
             String[] lines = str.split("\\r?\\n", -1);
             for (int i = 0; i < lines.length; i++) {
                 lineBuf.append(lines[i]);
@@ -535,15 +511,9 @@ public class ServerGUI extends JFrame {
         }
     };
 
-    // Ensure the new PrintStream is assigned correctly
     System.setOut(new PrintStream(teeStream, true));
 }
-    
-
-    // ─────────────────────────────────────────────────────────────────
-    //  Helpers
-    // ─────────────────────────────────────────────────────────────────
-
+  
     private Color playerColor(String id) {
         return P_COLORS[colorMap.getOrDefault(id, 0) % P_COLORS.length];
     }

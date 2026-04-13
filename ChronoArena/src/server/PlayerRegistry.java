@@ -28,7 +28,7 @@ import java.util.*;
 public class PlayerRegistry {
 
     // Parallel arrays: index = colorIndex, value = wins required
-    public static final int[]    UNLOCK_THRESHOLDS = { 0, 1, 2, 3, 5, 8, 12, 18 };
+    public static final int[]    UNLOCK_THRESHOLDS = { 0, 0, 0, 0, 0, 1, 2, 4 };
     public static final String[] COLOR_NAMES       = {
         "Blue", "Red", "Yellow", "Green", "Orange", "LightBlueGuy", "Purple", "Black"
     };

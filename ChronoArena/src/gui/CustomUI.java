@@ -420,6 +420,15 @@ public class CustomUI implements GameUI {
                     g.setColor(Color.WHITE);
                     g.setFont(new Font("Monospaced", Font.BOLD, 9));
                     g.drawString("❄", ix - 5, iy + 4);
+                } else if (item.isSpeedBoost) {
+                    // Speed boost: green circle with arrow symbol
+                    g.setColor(new Color(0, 255, 136, 200));
+                    g.fillOval(ix - 11, iy - 11, 22, 22);
+                    g.setColor(new Color(0, 160, 80));
+                    g.drawOval(ix - 11, iy - 11, 22, 22);
+                    g.setColor(new Color(0, 60, 30));
+                    g.setFont(new Font("Monospaced", Font.BOLD, 11));
+                    g.drawString("▶", ix - 6, iy + 5);
                 } else {
                     // Energy coin: gold circle with $ symbol
                     g.setColor(new Color(255, 215, 0, 220));

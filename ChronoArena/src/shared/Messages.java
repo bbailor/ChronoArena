@@ -83,6 +83,8 @@ public class Messages {
         public long    frozenUntilMs;
         public boolean hasWeapon;
         public int     score;
+        public boolean speedBoosted;
+        public long    speedBoostUntilMs;
     }
 
     public static class ZoneInfo implements Serializable {
@@ -97,7 +99,8 @@ public class Messages {
     public static class ItemInfo implements Serializable {
         public String  id;
         public int     x, y;
-        public boolean isWeapon; // false = energy coin
+        public boolean isWeapon;    // true = freeze weapon
+        public boolean isSpeedBoost; // true = speed boost (isWeapon must be false)
     }
 
     /** Client → Server: JOIN_REQUEST payload */

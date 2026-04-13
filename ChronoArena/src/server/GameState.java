@@ -33,8 +33,10 @@ public class GameState {
     final int   ENERGY_VALUE          = Config.getInt("item.energy.value");
     final int   TAG_PENALTY           = Config.getInt("tag.penalty.points");
     final long  GRACE_TIMER_MS        = Config.getLong("grace.timer.ms");
-    final long  FREEZE_DURATION_MS    = Config.getLong("freeze.duration.ms");
-    final long  ZONE_CAPTURE_TIME_MS  = Config.getLong("zone.capture.time.ms");
+    final long  FREEZE_DURATION_MS        = Config.getLong("freeze.duration.ms");
+    final long  ZONE_CAPTURE_TIME_MS      = Config.getLong("zone.capture.time.ms");
+    final long  SPEED_BOOST_DURATION_MS   = Config.getLong("speed.boost.duration.ms");
+    final int   SPEED_BOOST_MULTIPLIER    = Config.getInt("speed.boost.multiplier");
 
     GameState() {
         roundDurationMs = Config.getLong("round.duration.seconds") * 1000L;
@@ -68,10 +70,12 @@ public class GameState {
             pi.name          = p.name;
             pi.x             = p.x;
             pi.y             = p.y;
-            pi.frozen        = p.isFrozen();
-            pi.frozenUntilMs = p.frozenUntilMs;
-            pi.hasWeapon     = p.hasWeapon;
-            pi.score         = p.score;
+            pi.frozen             = p.isFrozen();
+            pi.frozenUntilMs      = p.frozenUntilMs;
+            pi.hasWeapon          = p.hasWeapon;
+            pi.score              = p.score;
+            pi.speedBoosted       = p.isSpeedBoosted();
+            pi.speedBoostUntilMs  = p.speedBoostUntilMs;
             snap.players.add(pi);
             snap.scores.put(p.id, p.score);
         }
@@ -91,11 +95,12 @@ public class GameState {
         }
 
         for (Item item : items.values()) {
-            ItemInfo ii = new ItemInfo();
-            ii.id       = item.id;
-            ii.x        = item.x;
-            ii.y        = item.y;
-            ii.isWeapon = item.isWeapon;
+            ItemInfo ii       = new ItemInfo();
+            ii.id             = item.id;
+            ii.x              = item.x;
+            ii.y              = item.y;
+            ii.isWeapon       = item.isWeapon;
+            ii.isSpeedBoost   = item.isSpeedBoost;
             snap.items.add(ii);
         }
 
@@ -112,11 +117,13 @@ public class GameState {
         int x, y;
         int score    = 0;
         boolean hasWeapon = false;
-        long frozenUntilMs = 0;
-        long lastSeqNum    = -1; // UDP dedup
+        long frozenUntilMs     = 0;
+        long speedBoostUntilMs = 0;
+        long lastSeqNum        = -1; // UDP dedup
 
         // Speed: normally 5px per tick; can be boosted
-        int speed = 5;
+        int speed    = 5;
+        int baseSpeed = 5;
 
         ServerPlayer(String id, String name, int startX, int startY) {
             this.id   = id;
@@ -127,6 +134,10 @@ public class GameState {
 
         boolean isFrozen() {
             return System.currentTimeMillis() < frozenUntilMs;
+        }
+
+        boolean isSpeedBoosted() {
+            return System.currentTimeMillis() < speedBoostUntilMs;
         }
     }
 
@@ -163,12 +174,14 @@ public class GameState {
         final String  id;
         final int     x, y;
         final boolean isWeapon;
+        final boolean isSpeedBoost;
 
-        Item(String id, int x, int y, boolean isWeapon) {
-            this.id       = id;
-            this.x        = x;
-            this.y        = y;
-            this.isWeapon = isWeapon;
+        Item(String id, int x, int y, boolean isWeapon, boolean isSpeedBoost) {
+            this.id          = id;
+            this.x           = x;
+            this.y           = y;
+            this.isWeapon    = isWeapon;
+            this.isSpeedBoost = isSpeedBoost;
         }
     }
 }

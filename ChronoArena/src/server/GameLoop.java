@@ -283,14 +283,20 @@ public class GameLoop implements Runnable {
             GameState.Item item = it.next().getValue();
             double dist = Math.hypot(item.x - player.x, item.y - player.y);
             if (dist <= PICKUP_RANGE) {
+                String kind;
                 if (item.isWeapon) {
                     player.hasWeapon = true;
+                    kind = "weapon";
+                } else if (item.isSpeedBoost) {
+                    player.speedBoostUntilMs = System.currentTimeMillis() + state.SPEED_BOOST_DURATION_MS;
+                    player.speed = player.baseSpeed * state.SPEED_BOOST_MULTIPLIER;
+                    kind = "speed boost";
                 } else {
                     player.score += state.ENERGY_VALUE;
+                    kind = "energy";
                 }
                 it.remove(); // item consumed
-                System.out.println("[GameLoop] " + player.name
-                        + " picked up " + (item.isWeapon ? "weapon" : "energy"));
+                System.out.println("[GameLoop] " + player.name + " picked up " + kind);
             }
         }
     }
@@ -305,21 +311,32 @@ public class GameLoop implements Runnable {
         if (now - lastItemSpawnMs < ITEM_SPAWN_INTERVAL_MS) return;
         lastItemSpawnMs = now;
 
-        int   x        = rng.nextInt(ARENA_W - 40) + 20;
-        int   y        = rng.nextInt(ARENA_H - 40) + 20;
-        boolean weapon = rng.nextBoolean();
-        String id      = "item-" + (++itemCounter);
+        int    x    = rng.nextInt(ARENA_W - 40) + 20;
+        int    y    = rng.nextInt(ARENA_H - 40) + 20;
+        String id   = "item-" + (++itemCounter);
 
-        state.items.put(id, new GameState.Item(id, x, y, weapon));
-        System.out.println("[GameLoop] Spawned " + (weapon ? "weapon" : "energy") + " at (" + x + "," + y + ")");
+        // 3 equally likely types: weapon, energy, speed boost
+        int type = rng.nextInt(3);
+        boolean isWeapon     = (type == 0);
+        boolean isSpeedBoost = (type == 2);
+        String  kindName     = isWeapon ? "weapon" : (isSpeedBoost ? "speed boost" : "energy");
+
+        state.items.put(id, new GameState.Item(id, x, y, isWeapon, isSpeedBoost));
+        System.out.println("[GameLoop] Spawned " + kindName + " at (" + x + "," + y + ")");
     }
 
     // ------------------------------------------------------------------ //
     //  Misc
     // ------------------------------------------------------------------ //
     private void updateFreezeTimers() {
-        // Nothing needed here - isFrozen() checks timestamp dynamically.
-        // This hook is reserved for side-effects (e.g., visual notifications).
+        // Restore speed when a speed boost expires
+        long now = System.currentTimeMillis();
+        for (GameState.ServerPlayer p : state.players.values()) {
+            if (p.speedBoostUntilMs > 0 && now >= p.speedBoostUntilMs) {
+                p.speed            = p.baseSpeed;
+                p.speedBoostUntilMs = 0;
+            }
+        }
     }
 
     private void endRound() {

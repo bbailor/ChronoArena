@@ -50,6 +50,7 @@ public class SwingUI implements GameUI {
     private static final Color CAPTURE_CLR  = new Color(0x00e5ff, true);
     private static final Color WEAPON_CLR   = new Color(0xff6b35);
     private static final Color ENERGY_CLR   = new Color(0xffd700);
+    private static final Color SPEED_CLR    = new Color(0x00ff88);
     private static final Color FROZEN_CLR   = new Color(0x88ccff);
     private static final Color TEXT_MAIN    = new Color(0xe8e8ff);
     private static final Color TEXT_DIM     = new Color(0x888aaa);
@@ -88,7 +89,8 @@ public class SwingUI implements GameUI {
     // ── Notification overlay (freeze hit, tagged, etc.) ───────────────
     private volatile String  notification     = null;
     private volatile long notifyExpiresMs = 0;
-    private volatile boolean wasFrozen = false;
+    private volatile boolean wasFrozen       = false;
+    private volatile boolean wasSpeedBoosted = false;
     
     // Sprites
     private BufferedImage blueSprite;
@@ -128,6 +130,10 @@ public class SwingUI implements GameUI {
                         showNotification("TAGGED!  −10 PTS", 2500);
                     }
                     wasFrozen = p.frozen;
+                    if (p.speedBoosted && !wasSpeedBoosted) {
+                        showNotification("SPEED BOOST!", 1800);
+                    }
+                    wasSpeedBoosted = p.speedBoosted;
                     break;
                 }
             }
@@ -474,7 +480,9 @@ public class SwingUI implements GameUI {
             for (ItemInfo item : items) {
                 // Pulsing glow effect
                 float pulse = 0.5f + 0.5f * (float) Math.sin(now / 300.0 + item.x);
-                Color base = item.isWeapon ? WEAPON_CLR : ENERGY_CLR;
+                Color base = item.isWeapon ? WEAPON_CLR
+                           : item.isSpeedBoost ? SPEED_CLR
+                           : ENERGY_CLR;
 
                 // Glow
                 RadialGradientPaint glow = new RadialGradientPaint(
@@ -494,7 +502,7 @@ public class SwingUI implements GameUI {
                 g2.setColor(BG_DARK);
                 g2.setFont(new Font("Dialog", Font.BOLD, 10));
                 FontMetrics fm = g2.getFontMetrics();
-                String icon = item.isWeapon ? "❄" : "⚡";
+                String icon = item.isWeapon ? "❄" : item.isSpeedBoost ? "▶" : "⚡";
                 g2.drawString(icon, item.x - fm.stringWidth(icon)/2, item.y + fm.getAscent()/2 - 1);
             }
         }
@@ -516,6 +524,19 @@ public class SwingUI implements GameUI {
                     g2.setStroke(new BasicStroke(2.5f));
                     g2.drawOval(p.x - PLAYER_R - 6, p.y - PLAYER_R - 6,
                                 (PLAYER_R + 6) * 2, (PLAYER_R + 6) * 2);
+                } else if (p.speedBoosted) {
+                    // Speed-boost ring (green, spinning-dashes effect via phase offset)
+                    long now2 = System.currentTimeMillis();
+                    float phase = (now2 % 800) / 800f;
+                    g2.setColor(new Color(SPEED_CLR.getRed(), SPEED_CLR.getGreen(), SPEED_CLR.getBlue(), 70));
+                    g2.fillOval(p.x - PLAYER_R - 6, p.y - PLAYER_R - 6,
+                                (PLAYER_R + 6) * 2, (PLAYER_R + 6) * 2);
+                    g2.setColor(SPEED_CLR);
+                    g2.setStroke(new BasicStroke(2.5f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND,
+                                                  1f, new float[]{6f, 4f}, phase * 10f));
+                    g2.drawOval(p.x - PLAYER_R - 6, p.y - PLAYER_R - 6,
+                                (PLAYER_R + 6) * 2, (PLAYER_R + 6) * 2);
+                    g2.setStroke(new BasicStroke(1.5f));
                 } else {
                     // Soft glow
                     RadialGradientPaint glow = new RadialGradientPaint(
@@ -599,6 +620,18 @@ public class SwingUI implements GameUI {
                         fm = g2.getFontMetrics();
                         g2.setColor(FROZEN_CLR);
                         g2.drawString(ft, p.x - fm.stringWidth(ft) / 2, p.y + 4);
+                    }
+                }
+
+                // Speed-boost countdown
+                if (p.speedBoosted) {
+                    long ms = p.speedBoostUntilMs - System.currentTimeMillis();
+                    if (ms > 0) {
+                        String bt = String.format("▶%.1fs", ms / 1000.0);
+                        g2.setFont(new Font("Monospaced", Font.BOLD, 11));
+                        fm = g2.getFontMetrics();
+                        g2.setColor(SPEED_CLR);
+                        g2.drawString(bt, p.x - fm.stringWidth(bt) / 2, p.y + PLAYER_R + 24);
                     }
                 }
             }

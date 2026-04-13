@@ -43,12 +43,14 @@ public class Messages {
         // Client → Server (TCP)
         JOIN_REQUEST,
         LEAVE,
+        PROFILE_REQUEST,      // sent before JOIN to look up win count + unlocked colors
         LOBBY_CONFIG_UPDATE,  // host updates game config (LobbyConfig payload)
         LOBBY_START,          // host requests game start
         LOBBY_COLOR_CHANGE,   // any player updates their color (Integer colorIndex payload)
 
         // Server → Client (TCP)
         JOIN_ACK,
+        PROFILE_RESPONSE,     // server replies with wins + unlockedColors list
         LOBBY_UPDATE,         // lobby state broadcast (LobbyState payload)
         GAME_STARTING,        // transition from lobby phase to game phase
         GAME_STATE,           // full authoritative snapshot
@@ -117,6 +119,18 @@ public class Messages {
         public LobbyState lobbyState;   // current lobby state at join time
     }
 
+    /** Client → Server: sent on a fresh connection before JOIN to fetch unlock data */
+    public static class ProfileRequest implements Serializable {
+        public String playerName;
+    }
+
+    /** Server → Client: reply to PROFILE_REQUEST */
+    public static class ProfileResponse implements Serializable {
+        public String       playerName;
+        public int          wins;
+        public java.util.List<Integer> unlockedColors; // e.g. [0, 1, 2]
+    }
+
     // ------------------------------------------------------------------ //
     //  Game state messages
     // ------------------------------------------------------------------ //
@@ -142,7 +156,7 @@ public class Messages {
         public int     score;
         public boolean speedBoosted;
         public long    speedBoostUntilMs;
-        public int     colorIndex; // index into SwingUI.PLAYER_COLORS palette
+        public int     colorIndex; // server-validated skin index → selects ___Guy.png sprite
     }
 
     public static class ZoneInfo implements Serializable {

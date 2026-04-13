@@ -32,18 +32,22 @@ public class ClientManager {
     private final Map<String, ClientHandler> handlers = new ConcurrentHashMap<>();
     private final GameState state;
     private final AtomicInteger playerCounter = new AtomicInteger(0);
+    private final PlayerRegistry registry;
+
+    // Maps playerId → playerName for win recording
+    private final Map<String, String> playerNames = new ConcurrentHashMap<>();
 
     // ── Lobby state ────────────────────────────────────────────────────
     private volatile String     hostPlayerId = null;
     private          LobbyConfig lobbyConfig  = buildDefaultLobbyConfig();
-    // Ordered list of player IDs in join order (for lobby display)
     private final List<String>  lobbyOrder   = new CopyOnWriteArrayList<>();
 
     // ── Game loop reference (set after construction) ───────────────────
     private GameLoop gameLoop;
 
     public ClientManager(GameState state) {
-        this.state = state;
+        this.state    = state;
+        this.registry = new PlayerRegistry();
     }
 
     /** Must be called before any client connects. */
@@ -60,13 +64,29 @@ public class ClientManager {
             out.flush();
             ObjectInputStream  in  = new ObjectInputStream(socket.getInputStream());
 
-            // Read JOIN_REQUEST
-            TcpMessage msg = (TcpMessage) in.readObject();
-            if (msg.type != MsgType.JOIN_REQUEST) {
+            // First message may be a PROFILE_REQUEST (pre-join profile lookup)
+            TcpMessage first = (TcpMessage) in.readObject();
+
+            if (first.type == MsgType.PROFILE_REQUEST) {
+                ProfileRequest pr = (ProfileRequest) first.payload;
+                PlayerRegistry.PlayerRecord rec = registry.getOrCreate(pr.playerName);
+
+                ProfileResponse resp = new ProfileResponse();
+                resp.playerName     = pr.playerName;
+                resp.wins           = rec.wins;
+                resp.unlockedColors = rec.unlockedColors;
+                out.writeObject(new TcpMessage(MsgType.PROFILE_RESPONSE, resp));
+                out.flush();
+
+                // Now read the actual JOIN_REQUEST
+                first = (TcpMessage) in.readObject();
+            }
+
+            if (first.type != MsgType.JOIN_REQUEST) {
                 socket.close();
                 return;
             }
-            JoinRequest req = (JoinRequest) msg.payload;
+            JoinRequest req = (JoinRequest) first.payload;
 
             // Reject if game already running or lobby is full
             if (phase == Phase.GAME) {
@@ -96,12 +116,20 @@ public class ClientManager {
             boolean isHost = (hostPlayerId == null);
             if (isHost) hostPlayerId = playerId;
 
-            // Add to game state (player exists in state but game hasn't started)
+            // Pick a default color: first unlocked color not already taken by another player
+            PlayerRegistry.PlayerRecord rec = registry.getOrCreate(req.playerName);
+            int defaultColor = 0;
+            for (int candidate : rec.unlockedColors) {
+                boolean taken = state.players.values().stream()
+                        .anyMatch(p -> p.colorIndex == candidate);
+                if (!taken) { defaultColor = candidate; break; }
+            }
+
             GameState.ServerPlayer player = new GameState.ServerPlayer(
                     playerId, req.playerName, startPos[0], startPos[1]);
-            // Assign default color based on join order (0-7, wrapping)
-            player.colorIndex = (playerCounter.get() - 1) % 8;
+            player.colorIndex = defaultColor;
             state.players.put(playerId, player);
+            playerNames.put(playerId, req.playerName);
             lobbyOrder.add(playerId);
 
             // Build JOIN_ACK with current lobby state
@@ -122,10 +150,10 @@ public class ClientManager {
 
             System.out.println("[ClientManager] " + req.playerName
                     + " joined as " + playerId
+                    + " (color " + defaultColor + ")"
                     + (isHost ? " [HOST]" : "")
                     + " at (" + startPos[0] + "," + startPos[1] + ")");
 
-            // Broadcast updated lobby to everyone (including the new player)
             broadcastLobbyUpdate();
 
         } catch (IOException | ClassNotFoundException e) {
@@ -137,12 +165,20 @@ public class ClientManager {
     //  Lobby message handlers (called from ClientHandler threads)
     // ------------------------------------------------------------------ //
 
-    /** A player changed their color preference. Rejects the request if another player
-     *  already holds that color. Stores and re-broadcasts on success. */
+    /** A player changed their color preference. Validates against their unlocked colors,
+     *  rejects if another player already holds that color. */
     void handleColorChange(String senderId, int colorIndex) {
         if (phase != Phase.LOBBY) return;
         int idx = Math.max(0, Math.min(7, colorIndex));
-        // Reject if the color is already claimed by someone else
+
+        // Validate: must be in player's unlocked list
+        String name = playerNames.get(senderId);
+        if (name != null) {
+            PlayerRegistry.PlayerRecord rec = registry.getOrCreate(name);
+            if (!rec.unlockedColors.contains(idx)) return; // not unlocked
+        }
+
+        // Reject if already claimed by someone else
         for (Map.Entry<String, GameState.ServerPlayer> entry : state.players.entrySet()) {
             if (!entry.getKey().equals(senderId) && entry.getValue().colorIndex == idx) return;
         }
@@ -217,6 +253,12 @@ public class ClientManager {
     }
 
     public void broadcastRoundEnd(String winnerId, Map<String, Integer> scores) {
+        // Record win in persistent registry
+        String winnerName = playerNames.get(winnerId);
+        if (winnerName != null) {
+            registry.recordWin(winnerName);
+            System.out.println("[ClientManager] Recorded win for " + winnerName);
+        }
         Map<String, Object> payload = new HashMap<>();
         payload.put("winnerId", winnerId);
         payload.put("scores",   scores);

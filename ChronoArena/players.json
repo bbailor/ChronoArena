@@ -1,0 +1,10 @@
+{
+  "Jix": {
+    "wins": 1,
+    "unlockedColors": [0, 1]
+  },
+  "Player": {
+    "wins": 0,
+    "unlockedColors": [0]
+  }
+}

@@ -3,6 +3,7 @@ package gui;
 import shared.Messages.*;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 
 /**
  * GameUI — the only contract between the client networking layer and any GUI.
@@ -15,27 +16,55 @@ import java.util.Map;
  * 1. Create a class that implements GameUI (e.g. MySwingScreen implements GameUI)
  * 2. Implement every method below
  * 3. In Client.java, replace:
- *        GameUI ui = new HeadlessUI();
+ *        GameUI ui = new SwingUI();
  *    with:
  *        GameUI ui = new MySwingScreen(...);
  * 4. Compile and run — the network layer is unchanged.
  *
  * THREADING NOTES
  * ───────────────
- * - onStateUpdate()  is called from the TCP listener thread at ~20 Hz.
- *   If you are using Swing, wrap your repaint() inside SwingUtilities.invokeLater().
- * - All other methods are called from the main client thread.
+ * - onLobbyJoined() / onLobbyUpdate() are called from the main client thread.
+ * - onStateUpdate() is called from the TCP listener thread at ~20 Hz.
+ *   If you are using Swing, wrap repaints inside SwingUtilities.invokeLater().
  * - getNextAction() is called from a background polling thread every 50 ms.
  *   Make it thread-safe (e.g. use a volatile field or a concurrent queue).
  */
 public interface GameUI {
 
     // ------------------------------------------------------------------ //
-    //  Lifecycle
+    //  Lobby lifecycle
     // ------------------------------------------------------------------ //
 
     /**
-     * Called once after a successful JOIN_ACK.
+     * Called after a successful JOIN_ACK, while waiting in the lobby.
+     * Show a lobby screen: connected player list, game config (host only),
+     * and a "Start Game" button (host only) or "Waiting…" label.
+     *
+     * Use {@code messageSender} to send TcpMessages back to the server:
+     *   - {@code new TcpMessage(MsgType.LOBBY_START, null)}         — host starts game
+     *   - {@code new TcpMessage(MsgType.LOBBY_CONFIG_UPDATE, cfg)}  — host changes config
+     *
+     * @param myPlayerId    server-assigned ID for this client (e.g. "P1")
+     * @param playerName    the name the player entered at login
+     * @param isHost        true if this client is the lobby host
+     * @param initialState  current lobby state at the moment of joining
+     * @param messageSender consumer that queues a TcpMessage to be sent to the server
+     */
+    void onLobbyJoined(String myPlayerId, String playerName, boolean isHost,
+                       LobbyState initialState, Consumer<TcpMessage> messageSender);
+
+    /**
+     * Called whenever the lobby state changes (player joins/leaves, host updates config).
+     * Refresh the player list and displayed settings.
+     */
+    void onLobbyUpdate(LobbyState state);
+
+    // ------------------------------------------------------------------ //
+    //  Game lifecycle
+    // ------------------------------------------------------------------ //
+
+    /**
+     * Called once after the lobby transitions to game phase.
      * Show your main game window / start your render loop here.
      *
      * @param myPlayerId  the server-assigned ID for this client (e.g. "P1")
@@ -45,8 +74,7 @@ public interface GameUI {
 
     /**
      * Called every time the server pushes a new authoritative state snapshot.
-     * This is your repaint / redraw trigger.
-     * Called at roughly the server tick rate (~20 Hz).
+     * This is your repaint / redraw trigger (~20 Hz).
      */
     void onStateUpdate(GameStateSnapshot snapshot);
 
@@ -87,15 +115,12 @@ public interface GameUI {
     ActionType getNextAction();
 
     // ------------------------------------------------------------------ //
-    //  Optional: lobby / name entry
+    //  Pre-lobby: name / server entry
     // ------------------------------------------------------------------ //
 
     /**
      * Called before connecting to the server.
      * Return the player name the user entered, or null to cancel/exit.
-     *
-     * You can show a splash screen, a dialog, read from args, or just return
-     * a hard-coded string for testing.
      *
      * @param defaultServerIp  the IP from game.properties (display as a hint)
      */

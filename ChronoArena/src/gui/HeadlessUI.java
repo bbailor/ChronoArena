@@ -4,6 +4,7 @@ import shared.Messages.*;
 
 import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 
 /**
  * HeadlessUI — a minimal, no-GUI implementation of GameUI.
@@ -152,6 +153,46 @@ public class HeadlessUI implements GameUI {
     // ------------------------------------------------------------------ //
     //  Lobby
     // ------------------------------------------------------------------ //
+
+    @Override
+    public void onLobbyJoined(String myPlayerId, String playerName,
+                               boolean isHost, LobbyState initialState,
+                               Consumer<TcpMessage> messageSender) {
+        System.out.println("\n[UI] Joined lobby as " + playerName + " (" + myPlayerId + ")"
+                + (isHost ? " [HOST]" : ""));
+        if (initialState != null) printLobbyState(initialState);
+        if (isHost) {
+            System.out.println("[UI] You are the host. Type 'start' to start the game.");
+            // For headless mode, auto-start after a short pause for testing convenience.
+            // Remove the line below to require manual 'start' input.
+            new Thread(() -> {
+                Scanner sc2 = new Scanner(System.in);
+                while (sc2.hasNextLine()) {
+                    if (sc2.nextLine().trim().equalsIgnoreCase("start")) {
+                        messageSender.accept(new TcpMessage(MsgType.LOBBY_START, null));
+                        break;
+                    }
+                }
+            }, "HeadlessLobbyInput").start();
+        }
+    }
+
+    @Override
+    public void onLobbyUpdate(LobbyState state) {
+        System.out.println("[UI] Lobby updated:");
+        printLobbyState(state);
+    }
+
+    private void printLobbyState(LobbyState state) {
+        System.out.println("     Players (" + state.players.size() + "):");
+        for (LobbyPlayerInfo p : state.players)
+            System.out.println("       " + p.name + " (" + p.id + ")" + (p.isHost ? " [HOST]" : ""));
+        if (state.config != null) {
+            LobbyConfig c = state.config;
+            System.out.println("     Config: " + c.roundDurationSeconds + "s round | "
+                    + c.maxPlayers + " max players | " + c.pointsPerZoneTick + " pts/zone/tick");
+        }
+    }
 
     @Override
     public String promptPlayerName(String defaultServerIp) {

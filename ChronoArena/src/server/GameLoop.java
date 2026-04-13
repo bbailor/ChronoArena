@@ -5,9 +5,13 @@ import shared.Messages.*;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.CountDownLatch;
 
 /**
  * Fixed-rate game loop.
+ *
+ * Waits on a start latch until the lobby host presses "Start Game",
+ * then runs the standard fixed-rate tick until the round timer expires.
  *
  * Each tick:
  *  1. Drain the action queue (all UDP inputs received this tick)
@@ -22,13 +26,16 @@ public class GameLoop implements Runnable {
     private final ClientManager clientManager;
     private final long tickRateMs;
 
+    // Blocks run() until the lobby host signals start
+    private final CountDownLatch startLatch = new CountDownLatch(1);
+
     // For duplicate UDP detection: track last processed seq per player
     private final Map<String, Long> lastSeqProcessed = new HashMap<>();
 
-    // Item ID counter
-    private int itemCounter = 0;
-    private long lastItemSpawnMs = 0;
-    private final long ITEM_SPAWN_INTERVAL_MS = Config.getLong("item.spawn.interval.ms");
+    // Item spawning
+    private int  itemCounter        = 0;
+    private long lastItemSpawnMs    = 0;
+    private long ITEM_SPAWN_INTERVAL_MS;
 
     // Arena bounds (match GUI)
     static final int ARENA_W = 800;
@@ -37,20 +44,50 @@ public class GameLoop implements Runnable {
     public GameLoop(GameState state,
                     ConcurrentLinkedQueue<PlayerAction> actionQueue,
                     ClientManager clientManager) {
-        this.state         = state;
-        this.actionQueue   = actionQueue;
-        this.clientManager = clientManager;
-        this.tickRateMs    = Config.getLong("tick.rate.ms");
+        this.state              = state;
+        this.actionQueue        = actionQueue;
+        this.clientManager      = clientManager;
+        this.tickRateMs         = Config.getLong("tick.rate.ms");
+        this.ITEM_SPAWN_INTERVAL_MS = Config.getLong("item.spawn.interval.ms");
     }
+
+    // ------------------------------------------------------------------ //
+    //  Lobby-to-game transition
+    // ------------------------------------------------------------------ //
+
+    /** Called by ClientManager when the host clicks "Start Game". */
+    public void signalStart() {
+        startLatch.countDown();
+    }
+
+    /**
+     * Apply lobby config values that live in GameLoop (item spawn rate).
+     * Called by ClientManager just before signalStart().
+     */
+    public void applyConfig(LobbyConfig config) {
+        ITEM_SPAWN_INTERVAL_MS = config.itemSpawnIntervalSeconds * 1000L;
+    }
+
+    // ------------------------------------------------------------------ //
+    //  Thread entry point
+    // ------------------------------------------------------------------ //
 
     @Override
     public void run() {
+        // Wait until lobby host starts the game
+        try {
+            startLatch.await();
+        } catch (InterruptedException e) {
+            System.out.println("[GameLoop] Interrupted before start.");
+            return;
+        }
+
         state.running      = true;
         state.roundStartMs = System.currentTimeMillis();
         lastItemSpawnMs    = state.roundStartMs;
 
         System.out.println("[GameLoop] Round started. Duration: "
-                + Config.getInt("round.duration.seconds") + "s  Tick: " + tickRateMs + "ms");
+                + (state.roundDurationMs / 1000) + "s  Tick: " + tickRateMs + "ms");
 
         while (state.running && state.timeRemainingMs() > 0) {
             long tickStart = System.currentTimeMillis();
@@ -90,7 +127,7 @@ public class GameLoop implements Runnable {
         // 3. Spawn items periodically
         maybeSpawnItem();
 
-        // 4. Unfreeze players whose timer expired
+        // 4. Unfreeze players / restore speed when timers expire
         updateFreezeTimers();
 
         // 5. Broadcast authoritative state to all clients
@@ -104,8 +141,7 @@ public class GameLoop implements Runnable {
         // --- Deduplication and out-of-order check ---
         long lastSeq = lastSeqProcessed.getOrDefault(action.playerId, -1L);
         if (action.sequenceNumber <= lastSeq) {
-            // duplicate or out-of-order packet - discard
-            return;
+            return; // duplicate or out-of-order packet
         }
         lastSeqProcessed.put(action.playerId, action.sequenceNumber);
 
@@ -144,9 +180,8 @@ public class GameLoop implements Runnable {
     private void applyFreezeRay(GameState.ServerPlayer attacker) {
         if (!attacker.hasWeapon) return;
 
-        // Find nearest unfrozen player within range
-        GameState.ServerPlayer target = null;
-        double bestDist = Double.MAX_VALUE;
+        GameState.ServerPlayer target  = null;
+        double                 bestDist = Double.MAX_VALUE;
 
         for (GameState.ServerPlayer p : state.players.values()) {
             if (p.id.equals(attacker.id) || p.isFrozen()) continue;
@@ -158,10 +193,9 @@ public class GameLoop implements Runnable {
         }
 
         if (target != null) {
-            long freezeUntil = System.currentTimeMillis() + state.FREEZE_DURATION_MS;
-            target.frozenUntilMs = freezeUntil;
-            target.score = Math.max(0, target.score - state.TAG_PENALTY);
-            attacker.hasWeapon = false; // weapon consumed
+            target.frozenUntilMs = System.currentTimeMillis() + state.FREEZE_DURATION_MS;
+            target.score         = Math.max(0, target.score - state.TAG_PENALTY);
+            attacker.hasWeapon   = false;
             System.out.println("[GameLoop] " + attacker.name + " froze " + target.name);
         }
     }
@@ -174,7 +208,6 @@ public class GameLoop implements Runnable {
 
         for (GameState.Zone zone : state.zones) {
 
-            // Find players currently inside this zone
             List<GameState.ServerPlayer> inside = new ArrayList<>();
             for (GameState.ServerPlayer p : state.players.values()) {
                 if (!p.isFrozen() && zone.contains(p.x, p.y)) {
@@ -190,7 +223,7 @@ public class GameLoop implements Runnable {
                 handleContestedZone(zone, inside, now);
             }
 
-            // Award points to owner each tick
+            // Award points to owner each tick (only when uncontested)
             if (zone.ownerPlayerId != null && !zone.contested) {
                 GameState.ServerPlayer owner = state.players.get(zone.ownerPlayerId);
                 if (owner != null) {
@@ -200,20 +233,14 @@ public class GameLoop implements Runnable {
         }
     }
 
-    /**
-     * Fairness rule: last owner keeps zone for GRACE_TIMER_MS after leaving.
-     * If not back in time, zone becomes unclaimed.
-     */
     private void handleEmptyZone(GameState.Zone zone, long now) {
-        zone.contested      = false;
+        zone.contested       = false;
         zone.capturingPlayer = null;
 
         if (zone.ownerPlayerId != null) {
-            // Start grace timer if not already running
             if (zone.graceExpiresMs == 0) {
                 zone.graceExpiresMs = now + state.GRACE_TIMER_MS;
             } else if (now > zone.graceExpiresMs) {
-                // Grace expired - zone is lost
                 System.out.println("[GameLoop] Zone " + zone.id
                         + " lost by " + zone.ownerPlayerId + " (grace expired)");
                 zone.ownerPlayerId  = null;
@@ -226,20 +253,17 @@ public class GameLoop implements Runnable {
                                            GameState.ServerPlayer player,
                                            long now) {
         zone.contested      = false;
-        zone.graceExpiresMs = 0; // player is back, cancel grace
+        zone.graceExpiresMs = 0;
 
         if (player.id.equals(zone.ownerPlayerId)) {
-            // Already the owner - reset capture tracker
             zone.capturingPlayer = null;
             zone.captureStartMs  = 0;
         } else {
-            // Capturing a new zone
             if (!player.id.equals(zone.capturingPlayer)) {
                 zone.capturingPlayer = player.id;
                 zone.captureStartMs  = now;
             }
-            // Check if capture complete
-            if (zone.captureProgress() >= 1.0) {
+            if (zone.captureProgress(state.ZONE_CAPTURE_TIME_MS) >= 1.0) {
                 System.out.println("[GameLoop] Zone " + zone.id
                         + " captured by " + player.name);
                 zone.ownerPlayerId   = player.id;
@@ -249,27 +273,19 @@ public class GameLoop implements Runnable {
         }
     }
 
-    /**
-     * Contest rule: zone is contested - no one earns points.
-     * First-arrived player keeps capture progress; newcomers reset it.
-     */
     private void handleContestedZone(GameState.Zone zone,
                                       List<GameState.ServerPlayer> inside,
                                       long now) {
         zone.contested      = true;
         zone.graceExpiresMs = 0;
 
-        // If the current owner is among the contested players, hold the zone
-        // If no owner, the conflict freezes capture progress
         boolean ownerPresent = inside.stream()
                 .anyMatch(p -> p.id.equals(zone.ownerPlayerId));
 
         if (!ownerPresent) {
-            // Reset capture - contested with no clear winner
             zone.capturingPlayer = null;
             zone.captureStartMs  = 0;
         }
-        // If owner is present, they hold the zone (no capture progress reset)
     }
 
     // ------------------------------------------------------------------ //
@@ -295,7 +311,7 @@ public class GameLoop implements Runnable {
                     player.score += state.ENERGY_VALUE;
                     kind = "energy";
                 }
-                it.remove(); // item consumed
+                it.remove();
                 System.out.println("[GameLoop] " + player.name + " picked up " + kind);
             }
         }
@@ -315,8 +331,7 @@ public class GameLoop implements Runnable {
         int    y    = rng.nextInt(ARENA_H - 40) + 20;
         String id   = "item-" + (++itemCounter);
 
-        // 3 equally likely types: weapon, energy, speed boost
-        int type = rng.nextInt(3);
+        int     type         = rng.nextInt(3);
         boolean isWeapon     = (type == 0);
         boolean isSpeedBoost = (type == 2);
         String  kindName     = isWeapon ? "weapon" : (isSpeedBoost ? "speed boost" : "energy");
@@ -329,11 +344,10 @@ public class GameLoop implements Runnable {
     //  Misc
     // ------------------------------------------------------------------ //
     private void updateFreezeTimers() {
-        // Restore speed when a speed boost expires
         long now = System.currentTimeMillis();
         for (GameState.ServerPlayer p : state.players.values()) {
             if (p.speedBoostUntilMs > 0 && now >= p.speedBoostUntilMs) {
-                p.speed            = p.baseSpeed;
+                p.speed             = p.baseSpeed;
                 p.speedBoostUntilMs = 0;
             }
         }
@@ -342,9 +356,8 @@ public class GameLoop implements Runnable {
     private void endRound() {
         state.running = false;
 
-        // Find winner
-        String       winnerId   = null;
-        int          bestScore  = -1;
+        String              winnerId   = null;
+        int                 bestScore  = -1;
         Map<String,Integer> finalScores = new HashMap<>();
 
         for (GameState.ServerPlayer p : state.players.values()) {
@@ -355,7 +368,8 @@ public class GameLoop implements Runnable {
             }
         }
 
-        System.out.println("[GameLoop] Round over. Winner: " + winnerId + " with " + bestScore + " pts");
+        System.out.println("[GameLoop] Round over. Winner: " + winnerId
+                + " with " + bestScore + " pts");
         clientManager.broadcastRoundEnd(winnerId, finalScores);
     }
 }

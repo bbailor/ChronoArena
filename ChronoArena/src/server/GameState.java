@@ -25,27 +25,44 @@ public class GameState {
     // --- Round timing ---
     long roundStartMs;
     long roundDurationMs;
-    boolean running = false;
+    boolean running  = false;
     long tickNumber  = 0;
 
-    // --- Tunables from config ---
-    final int   POINTS_PER_ZONE_TICK  = Config.getInt("points.per.zone.tick");
-    final int   ENERGY_VALUE          = Config.getInt("item.energy.value");
-    final int   TAG_PENALTY           = Config.getInt("tag.penalty.points");
-    final long  GRACE_TIMER_MS        = Config.getLong("grace.timer.ms");
-    final long  FREEZE_DURATION_MS        = Config.getLong("freeze.duration.ms");
-    final long  ZONE_CAPTURE_TIME_MS      = Config.getLong("zone.capture.time.ms");
-    final long  SPEED_BOOST_DURATION_MS   = Config.getLong("speed.boost.duration.ms");
-    final int   SPEED_BOOST_MULTIPLIER    = Config.getInt("speed.boost.multiplier");
+    // --- Tunables (non-final so lobby config can override them before start) ---
+    int   POINTS_PER_ZONE_TICK  = Config.getInt("points.per.zone.tick");
+    int   ENERGY_VALUE          = Config.getInt("item.energy.value");
+    int   TAG_PENALTY           = Config.getInt("tag.penalty.points");
+    long  GRACE_TIMER_MS        = Config.getLong("grace.timer.ms");
+    long  FREEZE_DURATION_MS    = Config.getLong("freeze.duration.ms");
+    long  ZONE_CAPTURE_TIME_MS  = Config.getLong("zone.capture.time.ms");
+    long  SPEED_BOOST_DURATION_MS = Config.getLong("speed.boost.duration.ms");
+    int   SPEED_BOOST_MULTIPLIER  = Config.getInt("speed.boost.multiplier");
 
     GameState() {
         roundDurationMs = Config.getLong("round.duration.seconds") * 1000L;
         initZones();
     }
 
+    /**
+     * Apply lobby configuration overrides.
+     * Must be called before the game loop starts.
+     */
+    void applyConfig(LobbyConfig config) {
+        roundDurationMs         = config.roundDurationSeconds * 1000L;
+        POINTS_PER_ZONE_TICK    = config.pointsPerZoneTick;
+        TAG_PENALTY             = config.tagPenaltyPoints;
+        FREEZE_DURATION_MS      = config.freezeDurationSeconds * 1000L;
+        ZONE_CAPTURE_TIME_MS    = config.zoneCaptureTimeSeconds * 1000L;
+        SPEED_BOOST_DURATION_MS = config.speedBoostDurationSeconds * 1000L;
+        System.out.println("[GameState] Config applied: "
+            + config.roundDurationSeconds + "s round, "
+            + config.maxPlayers + " max players, "
+            + config.pointsPerZoneTick + " pts/zone/tick");
+    }
+
     private void initZones() {
         // Three zones on the map - positions match the GUI constants
-        zones.add(new Zone("A", 80,  100, 120, 120));
+        zones.add(new Zone("A",  80, 100, 120, 120));
         zones.add(new Zone("B", 320, 100, 120, 120));
         zones.add(new Zone("C", 560, 100, 120, 120));
     }
@@ -65,32 +82,32 @@ public class GameState {
         snap.scores                 = new HashMap<>();
 
         for (ServerPlayer p : players.values()) {
-            PlayerInfo pi    = new PlayerInfo();
-            pi.id            = p.id;
-            pi.name          = p.name;
-            pi.x             = p.x;
-            pi.y             = p.y;
-            pi.frozen             = p.isFrozen();
-            pi.frozenUntilMs      = p.frozenUntilMs;
-            pi.hasWeapon          = p.hasWeapon;
-            pi.score              = p.score;
-            pi.speedBoosted       = p.isSpeedBoosted();
-            pi.speedBoostUntilMs  = p.speedBoostUntilMs;
+            PlayerInfo pi        = new PlayerInfo();
+            pi.id                = p.id;
+            pi.name              = p.name;
+            pi.x                 = p.x;
+            pi.y                 = p.y;
+            pi.frozen            = p.isFrozen();
+            pi.frozenUntilMs     = p.frozenUntilMs;
+            pi.hasWeapon         = p.hasWeapon;
+            pi.score             = p.score;
+            pi.speedBoosted      = p.isSpeedBoosted();
+            pi.speedBoostUntilMs = p.speedBoostUntilMs;
             snap.players.add(pi);
             snap.scores.put(p.id, p.score);
         }
 
         for (Zone z : zones) {
-            ZoneInfo zi          = new ZoneInfo();
-            zi.id                = z.id;
-            zi.x                 = z.x;
-            zi.y                 = z.y;
-            zi.width             = z.width;
-            zi.height            = z.height;
-            zi.ownerPlayerId     = z.ownerPlayerId;
-            zi.contested         = z.contested;
-            zi.captureProgress   = z.captureProgress();
-            zi.graceExpiresMs    = z.graceExpiresMs;
+            ZoneInfo zi        = new ZoneInfo();
+            zi.id              = z.id;
+            zi.x               = z.x;
+            zi.y               = z.y;
+            zi.width           = z.width;
+            zi.height          = z.height;
+            zi.ownerPlayerId   = z.ownerPlayerId;
+            zi.contested       = z.contested;
+            zi.captureProgress = z.captureProgress(ZONE_CAPTURE_TIME_MS);
+            zi.graceExpiresMs  = z.graceExpiresMs;
             snap.zones.add(zi);
         }
 
@@ -115,14 +132,14 @@ public class GameState {
         final String id;
         final String name;
         int x, y;
-        int score    = 0;
+        int score         = 0;
         boolean hasWeapon = false;
         long frozenUntilMs     = 0;
         long speedBoostUntilMs = 0;
         long lastSeqNum        = -1; // UDP dedup
 
         // Speed: normally 5px per tick; can be boosted
-        int speed    = 5;
+        int speed     = 5;
         int baseSpeed = 5;
 
         ServerPlayer(String id, String name, int startX, int startY) {
@@ -144,11 +161,11 @@ public class GameState {
     static class Zone {
         final String id;
         final int x, y, width, height;
-        String  ownerPlayerId    = null;
-        boolean contested        = false;
-        long    graceExpiresMs   = 0;       // 0 = no grace running
-        long    captureStartMs   = 0;       // when current capture began
-        String  capturingPlayer  = null;    // who is currently capturing
+        String  ownerPlayerId   = null;
+        boolean contested       = false;
+        long    graceExpiresMs  = 0;       // 0 = no grace running
+        long    captureStartMs  = 0;       // when current capture began
+        String  capturingPlayer = null;    // who is currently capturing
 
         Zone(String id, int x, int y, int w, int h) {
             this.id     = id;
@@ -162,11 +179,11 @@ public class GameState {
             return px >= x && px <= x + width && py >= y && py <= y + height;
         }
 
-        double captureProgress() {
+        /** captureProgress now takes the duration so it respects lobby config */
+        double captureProgress(long captureDurationMs) {
             if (capturingPlayer == null || captureStartMs == 0) return 0;
             long elapsed = System.currentTimeMillis() - captureStartMs;
-            long cap     = Config.getLong("zone.capture.time.ms");
-            return Math.min(1.0, (double) elapsed / cap);
+            return Math.min(1.0, (double) elapsed / captureDurationMs);
         }
     }
 
@@ -177,10 +194,10 @@ public class GameState {
         final boolean isSpeedBoost;
 
         Item(String id, int x, int y, boolean isWeapon, boolean isSpeedBoost) {
-            this.id          = id;
-            this.x           = x;
-            this.y           = y;
-            this.isWeapon    = isWeapon;
+            this.id           = id;
+            this.x            = x;
+            this.y            = y;
+            this.isWeapon     = isWeapon;
             this.isSpeedBoost = isSpeedBoost;
         }
     }

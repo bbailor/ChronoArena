@@ -11,6 +11,8 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import shared.Messages.*;
 
+import java.util.function.Consumer;
+
 public class CustomUI implements GameUI {
 
     private volatile GameStateSnapshot latestSnapshot;
@@ -167,6 +169,26 @@ public class CustomUI implements GameUI {
 
     // ------------------------------------------------------------------ //
     //  Lobby
+    // ------------------------------------------------------------------ //
+    //  Lobby
+    // ------------------------------------------------------------------ //
+    private Consumer<TcpMessage> lobbySender;
+
+    @Override
+    public void onLobbyJoined(String myPlayerId, String playerName,
+                               boolean isHost, LobbyState initialState,
+                               Consumer<TcpMessage> messageSender) {
+        this.lobbySender = messageSender;
+        // TODO: show a lobby screen; call lobbySender.accept(new TcpMessage(MsgType.LOBBY_START, null))
+        // when the host is ready to start, or auto-start here for testing:
+        if (isHost) messageSender.accept(new TcpMessage(MsgType.LOBBY_START, null));
+    }
+
+    @Override
+    public void onLobbyUpdate(LobbyState state) {
+        // TODO: refresh player list and config display
+    }
+
     // ------------------------------------------------------------------ //
     private String enteredName = "Player";
     private String enteredIp   = null;

@@ -7,9 +7,6 @@ import java.util.Map;
 /**
  * All network messages. Both TCP (via ObjectOutputStream) and UDP
  * (serialized bytes) use these types.
- *
- * UDP packets include a sequence number and player ID so the server
- * can detect out-of-order and duplicate packets.
  */
 public class Messages {
 
@@ -39,19 +36,23 @@ public class Messages {
     }
 
     // ------------------------------------------------------------------ //
-    //  TCP messages (Server ↔ Client)
+    //  TCP message types (Server ↔ Client)
     // ------------------------------------------------------------------ //
     public enum MsgType {
         // Client → Server (TCP)
         JOIN_REQUEST,
         LEAVE,
+        LOBBY_CONFIG_UPDATE,  // host updates game config (LobbyConfig payload)
+        LOBBY_START,          // host requests game start
 
         // Server → Client (TCP)
-        JOIN_ACK,         // welcome + assigned player id
-        GAME_STATE,       // full authoritative snapshot
-        SCORE_UPDATE,     // lightweight score-only push
-        ROUND_END,        // final scores, winner
-        KILL_SWITCH,      // server tells client to disconnect
+        JOIN_ACK,
+        LOBBY_UPDATE,         // lobby state broadcast (LobbyState payload)
+        GAME_STARTING,        // transition from lobby phase to game phase
+        GAME_STATE,           // full authoritative snapshot
+        SCORE_UPDATE,         // lightweight score-only push
+        ROUND_END,            // final scores, winner
+        KILL_SWITCH,          // server tells client to disconnect
         ERROR
     }
 
@@ -65,13 +66,65 @@ public class Messages {
         }
     }
 
+    // ------------------------------------------------------------------ //
+    //  Lobby messages
+    // ------------------------------------------------------------------ //
+
+    /** Game settings configurable by the host during the lobby phase */
+    public static class LobbyConfig implements Serializable {
+        public int roundDurationSeconds      = 180;
+        public int maxPlayers                = 8;
+        public int pointsPerZoneTick         = 2;
+        public int freezeDurationSeconds     = 3;
+        public int zoneCaptureTimeSeconds    = 2;
+        public int itemSpawnIntervalSeconds  = 8;
+        public int tagPenaltyPoints          = 10;
+        public int speedBoostDurationSeconds = 5;
+    }
+
+    /** A single player's entry in the lobby list */
+    public static class LobbyPlayerInfo implements Serializable {
+        public String  id;
+        public String  name;
+        public boolean isHost;
+    }
+
+    /** Full lobby state broadcast to all clients on any lobby change */
+    public static class LobbyState implements Serializable {
+        public List<LobbyPlayerInfo> players;
+        public LobbyConfig           config;
+        public String                hostPlayerId;
+    }
+
+    // ------------------------------------------------------------------ //
+    //  Join handshake
+    // ------------------------------------------------------------------ //
+
+    /** Client → Server: JOIN_REQUEST payload */
+    public static class JoinRequest implements Serializable {
+        public String playerName;
+    }
+
+    /** Server → Client: JOIN_ACK payload */
+    public static class JoinAck implements Serializable {
+        public String     assignedPlayerId;
+        public boolean    success;
+        public String     message;
+        public boolean    isHost;       // true if this player is the lobby host
+        public LobbyState lobbyState;   // current lobby state at join time
+    }
+
+    // ------------------------------------------------------------------ //
+    //  Game state messages
+    // ------------------------------------------------------------------ //
+
     /** Server → Client: full game snapshot (sent every tick) */
     public static class GameStateSnapshot implements Serializable {
         public long tickNumber;
         public long roundTimeRemainingMs;
-        public List<PlayerInfo>  players;
-        public List<ZoneInfo>    zones;
-        public List<ItemInfo>    items;
+        public List<PlayerInfo>     players;
+        public List<ZoneInfo>       zones;
+        public List<ItemInfo>       items;
         public Map<String, Integer> scores; // playerId → score
     }
 
@@ -99,19 +152,7 @@ public class Messages {
     public static class ItemInfo implements Serializable {
         public String  id;
         public int     x, y;
-        public boolean isWeapon;    // true = freeze weapon
+        public boolean isWeapon;     // true = freeze weapon
         public boolean isSpeedBoost; // true = speed boost (isWeapon must be false)
-    }
-
-    /** Client → Server: JOIN_REQUEST payload */
-    public static class JoinRequest implements Serializable {
-        public String playerName;
-    }
-
-    /** Server → Client: JOIN_ACK payload */
-    public static class JoinAck implements Serializable {
-        public String  assignedPlayerId;
-        public boolean success;
-        public String  message;
     }
 }

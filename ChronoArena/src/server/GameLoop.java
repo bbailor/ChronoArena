@@ -179,12 +179,12 @@ public class GameLoop implements Runnable {
     }
 
     // ------------------------------------------------------------------ //
-    //  Score-steal attack logic
+    //  score-steal
     // ------------------------------------------------------------------ //
     private void applyScoreSteal(GameState.ServerPlayer attacker) {
         if (!attacker.hasScoreSteal) return;
 
-        // Find nearest player within the same range as the freeze ray
+        // finds nearest player within the same range as freeze ray
         GameState.ServerPlayer target   = null;
         double                 bestDist = Double.MAX_VALUE;
 

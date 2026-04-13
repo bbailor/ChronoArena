@@ -32,7 +32,7 @@ jar cfe Client.jar client.Client -C out . -C resource .
 Compiles the jar file with the correct resources.
 
 # Contributions: 
-Lukas: ServerGUI, Game/Weapon Logic
-Aaron: Powerups/Weapon Logic and Handling
-Ben: Server-Client Connections. ClientGUI, Lobby Frame + Logic, Game Logic
-Jackson: ClientGUI, Player color customization/progression 
+    Lukas: ServerGUI, Game/Weapon Logic
+    Aaron: Powerups/Weapon Logic and Handling
+    Ben: Server-Client Connections. ClientGUI, Lobby Frame + Logic, Game Logic
+    Jackson: ClientGUI, Player color customization/progression 

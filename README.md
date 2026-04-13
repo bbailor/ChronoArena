@@ -1,5 +1,5 @@
 to test:
-cd into ChronoArena folder
+cd into ChronoArena folder (where you can see src/)
 
 # Terminal 1 (Windows)
 java -cp out;resource server.Server
@@ -15,7 +15,9 @@ java -cp out:resource client.Client
 Make sure the out folder exists first (mkdir out), and that game.properties is copied into it after compiling (copy game.properties out\ on Windows, cp game.properties out/ on Mac/Linux).
 
 Compile all files:
-javac -d out src/shared/Config.java src/shared/Messages.java src/server/GameState.java src/server/GameLoop.java src/server/UdpReceiver.java src/server/ClientManager.java src/server/Server.java src/client/StateCache.java src/client/UdpSender.java src/gui/GameUI.java src/gui/HeadlessUI.java src/gui/CustomUI.java src/gui/SwingUI.java src/client/Client.java
+javac -d out src/server/*.java src/gui/*.java src/shared/*.java src/client/*.java
+
+Then run the command above to run your client with the correct IP, and set your unique name.
 
 For making JAR file, run in terminal:
 jar cfe Client.jar client.Client -C out . -C resource .

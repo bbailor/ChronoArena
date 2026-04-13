@@ -61,9 +61,10 @@ public class SwingUI implements GameUI {
 
     // Player palette — used for zone fill tints, score badges, name tags
     private static final Color[] PLAYER_COLORS = {
-        new Color(0x4fc3f7), new Color(0xef5350), new Color(0x66bb6a),
-        new Color(0xffa726), new Color(0xce93d8), new Color(0x26c6da),
-        new Color(0xd4e157), new Color(0xff7043)
+        new Color(91,  110, 225), new Color(172,  50,  50),
+        new Color(251,  242,  54), new Color(24, 107,   24),
+        new Color(223,  113, 38), new Color(95,   205, 228),
+        new Color(118, 66,  138), new Color(0, 0,  0),
     };
 
     // ── Sprite loading ────────────────────────────────────────────────

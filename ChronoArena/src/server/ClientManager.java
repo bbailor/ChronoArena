@@ -99,6 +99,8 @@ public class ClientManager {
             // Add to game state (player exists in state but game hasn't started)
             GameState.ServerPlayer player = new GameState.ServerPlayer(
                     playerId, req.playerName, startPos[0], startPos[1]);
+            // Assign default color based on join order (0-7, wrapping)
+            player.colorIndex = (playerCounter.get() - 1) % 8;
             state.players.put(playerId, player);
             lobbyOrder.add(playerId);
 
@@ -134,6 +136,20 @@ public class ClientManager {
     // ------------------------------------------------------------------ //
     //  Lobby message handlers (called from ClientHandler threads)
     // ------------------------------------------------------------------ //
+
+    /** A player changed their color preference. Rejects the request if another player
+     *  already holds that color. Stores and re-broadcasts on success. */
+    void handleColorChange(String senderId, int colorIndex) {
+        if (phase != Phase.LOBBY) return;
+        int idx = Math.max(0, Math.min(7, colorIndex));
+        // Reject if the color is already claimed by someone else
+        for (Map.Entry<String, GameState.ServerPlayer> entry : state.players.entrySet()) {
+            if (!entry.getKey().equals(senderId) && entry.getValue().colorIndex == idx) return;
+        }
+        GameState.ServerPlayer p = state.players.get(senderId);
+        if (p != null) p.colorIndex = idx;
+        broadcastLobbyUpdate();
+    }
 
     /** Host sent a config update. Apply and re-broadcast lobby state. */
     void handleLobbyConfigUpdate(String senderId, LobbyConfig config) {
@@ -179,9 +195,10 @@ public class ClientManager {
             GameState.ServerPlayer p = state.players.get(pid);
             if (p == null) continue;
             LobbyPlayerInfo lpi = new LobbyPlayerInfo();
-            lpi.id     = pid;
-            lpi.name   = p.name;
-            lpi.isHost = pid.equals(hostPlayerId);
+            lpi.id         = pid;
+            lpi.name       = p.name;
+            lpi.isHost     = pid.equals(hostPlayerId);
+            lpi.colorIndex = p.colorIndex;
             ls.players.add(lpi);
         }
         return ls;
@@ -313,6 +330,8 @@ public class ClientManager {
                             manager.handleLobbyConfigUpdate(playerId, (LobbyConfig) msg.payload);
                         case LOBBY_START ->
                             manager.handleLobbyStart(playerId);
+                        case LOBBY_COLOR_CHANGE ->
+                            manager.handleColorChange(playerId, (Integer) msg.payload);
                         default -> { /* ignore unknown messages */ }
                     }
                 }

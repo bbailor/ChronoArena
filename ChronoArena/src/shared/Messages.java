@@ -44,6 +44,7 @@ public class Messages {
         LEAVE,
         LOBBY_CONFIG_UPDATE,  // host updates game config (LobbyConfig payload)
         LOBBY_START,          // host requests game start
+        LOBBY_COLOR_CHANGE,   // any player updates their color (Integer colorIndex payload)
 
         // Server → Client (TCP)
         JOIN_ACK,
@@ -87,6 +88,7 @@ public class Messages {
         public String  id;
         public String  name;
         public boolean isHost;
+        public int     colorIndex; // index into SwingUI.PLAYER_COLORS palette
     }
 
     /** Full lobby state broadcast to all clients on any lobby change */
@@ -138,6 +140,7 @@ public class Messages {
         public int     score;
         public boolean speedBoosted;
         public long    speedBoostUntilMs;
+        public int     colorIndex; // index into SwingUI.PLAYER_COLORS palette
     }
 
     public static class ZoneInfo implements Serializable {

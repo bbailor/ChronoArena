@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(javac -d out -cp src src/shared/Messages.java src/server/GameState.java src/server/ClientManager.java src/gui/SwingUI.java)"
+    ]
+  }
+}

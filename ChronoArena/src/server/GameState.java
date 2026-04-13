@@ -93,6 +93,7 @@ public class GameState {
             pi.score             = p.score;
             pi.speedBoosted      = p.isSpeedBoosted();
             pi.speedBoostUntilMs = p.speedBoostUntilMs;
+            pi.colorIndex        = p.colorIndex;
             snap.players.add(pi);
             snap.scores.put(p.id, p.score);
         }
@@ -137,6 +138,7 @@ public class GameState {
         long frozenUntilMs     = 0;
         long speedBoostUntilMs = 0;
         long lastSeqNum        = -1; // UDP dedup
+        int  colorIndex        = 0;  // player-chosen color (index into PLAYER_COLORS)
 
         // Speed: normally 5px per tick; can be boosted
         int speed     = 5;

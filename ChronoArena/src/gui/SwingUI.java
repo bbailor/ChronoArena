@@ -89,7 +89,7 @@ public class SwingUI implements GameUI {
     // ── Game-phase components ──────────────────────────────────────────
     private ArenaPanel arenaPanel;
     private JLabel     timerLabel, titleLabel;
-    private JPanel     scorePanel;
+    private JPanel     scoreRow1, scoreRow2; // two-row scoreboard (row2 appears with 5+ players)
 
     // ── Game-phase state ───────────────────────────────────────────────
     private volatile GameStateSnapshot currentSnap;
@@ -233,7 +233,11 @@ public class SwingUI implements GameUI {
     public void onStateUpdate(GameStateSnapshot snapshot) {
         if (snapshot.players != null) {
             for (PlayerInfo p : snapshot.players) {
-                colorMap.computeIfAbsent(p.id, k -> colorIndex++ % PLAYER_COLORS.length);
+                // Use server-authoritative color; fall back to auto-assign only if missing
+                if (p.colorIndex >= 0 && p.colorIndex < PLAYER_COLORS.length)
+                    colorMap.put(p.id, p.colorIndex);
+                else
+                    colorMap.computeIfAbsent(p.id, k -> colorIndex++ % PLAYER_COLORS.length);
             }
         }
         currentSnap = snapshot;
@@ -384,13 +388,27 @@ public class SwingUI implements GameUI {
         root.add(content, BorderLayout.CENTER);
 
         // ── Footer ────────────────────────────────────────────────────
+        JPanel footer = new JPanel(new BorderLayout());
+        footer.setBackground(new Color(0x08081a));
+        footer.setBorder(BorderFactory.createEmptyBorder(4, 12, 4, 12));
+
         JLabel hint = styled(
-            "  Waiting for host to configure settings and start the game  |  ESC = Quit",
+            "Waiting for host to configure settings and start the game  |  ESC = Quit",
             11, Font.ITALIC, TEXT_DIM);
-        hint.setBorder(BorderFactory.createEmptyBorder(4, 12, 4, 12));
-        hint.setBackground(new Color(0x08081a));
-        hint.setOpaque(true);
-        root.add(hint, BorderLayout.SOUTH);
+        footer.add(hint, BorderLayout.CENTER);
+
+        JButton helpBtn = new JButton("? HOW TO PLAY");
+        helpBtn.setFont(new Font("Monospaced", Font.BOLD, 11));
+        helpBtn.setForeground(ACCENT);
+        helpBtn.setBackground(new Color(0x08081a));
+        helpBtn.setBorder(BorderFactory.createLineBorder(ACCENT, 1));
+        helpBtn.setFocusPainted(false);
+        helpBtn.setFocusable(false); // prevent spacebar from triggering this button
+        helpBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        helpBtn.addActionListener(e -> showHelpDialog());
+        footer.add(helpBtn, BorderLayout.EAST);
+
+        root.add(footer, BorderLayout.SOUTH);
 
         // Minimum frame size covers both lobby and game
         root.setPreferredSize(new Dimension(ARENA_W, ARENA_H + 80));
@@ -516,6 +534,11 @@ public class SwingUI implements GameUI {
         int maxP = state.config != null ? state.config.maxPlayers : 8;
         playerCountLabel.setText(state.players.size() + " / " + maxP);
 
+        // Seed colorMap from server-provided color indices
+        for (LobbyPlayerInfo p : state.players) {
+            colorMap.put(p.id, p.colorIndex);
+        }
+
         // Rebuild player list
         playerListPanel.removeAll();
         for (LobbyPlayerInfo p : state.players) {
@@ -546,13 +569,16 @@ public class SwingUI implements GameUI {
     }
 
     private JPanel buildPlayerRow(LobbyPlayerInfo p) {
-        JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 4));
-        row.setOpaque(false);
-        row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 32));
+        boolean isMe = p.id.equals(myPlayerId);
+        int colorIdx = colorMap.getOrDefault(p.id, 0);
+        Color c = PLAYER_COLORS[colorIdx % PLAYER_COLORS.length];
+
+        // Name row (same for everyone)
+        JPanel nameRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 4));
+        nameRow.setOpaque(false);
+        nameRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 32));
 
         // Color dot
-        int colorIdx = colorMap.computeIfAbsent(p.id, k -> colorIndex++ % PLAYER_COLORS.length);
-        Color c = PLAYER_COLORS[colorIdx];
         JPanel dot = new JPanel() {
             @Override protected void paintComponent(Graphics g) {
                 g.setColor(c);
@@ -561,20 +587,81 @@ public class SwingUI implements GameUI {
         };
         dot.setOpaque(false);
         dot.setPreferredSize(new Dimension(16, 16));
-        row.add(dot);
+        nameRow.add(dot);
 
-        // Name
-        String displayName = p.name + (p.id.equals(myPlayerId) ? " (You)" : "");
-        JLabel nameLbl = styled(displayName, 13, Font.PLAIN, p.id.equals(myPlayerId) ? Color.WHITE : TEXT_MAIN);
-        row.add(nameLbl);
+        String displayName = p.name + (isMe ? " (You)" : "");
+        JLabel nameLbl = styled(displayName, 13, Font.PLAIN, isMe ? Color.WHITE : TEXT_MAIN);
+        nameRow.add(nameLbl);
 
-        // Host badge
         if (p.isHost) {
             JLabel badge = styled("[HOST]", 11, Font.BOLD, HOST_BADGE);
-            row.add(badge);
+            nameRow.add(badge);
         }
 
-        return row;
+        if (!isMe) return nameRow;
+
+        // For own player: add a color picker row below the name row
+        JPanel colorRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 2));
+        colorRow.setOpaque(false);
+        colorRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
+        colorRow.add(styled("Color:", 11, Font.PLAIN, TEXT_DIM));
+
+        for (int i = 0; i < PLAYER_COLORS.length; i++) {
+            final int chosenIdx = i;
+            final Color swatch  = PLAYER_COLORS[i];
+            JPanel swatchBtn = new JPanel() {
+                @Override protected void paintComponent(Graphics g) {
+                    super.paintComponent(g);
+                    Graphics2D g2 = (Graphics2D) g;
+                    g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                    int cur   = colorMap.getOrDefault(myPlayerId, 0);
+                    boolean taken = isColorTaken(chosenIdx);
+
+                    if (cur == chosenIdx) {
+                        // Selected — bright white ring around the swatch
+                        g2.setColor(Color.WHITE);
+                        g2.fillOval(0, 0, 18, 18);
+                        g2.setColor(swatch);
+                        g2.fillOval(2, 2, 14, 14);
+                    } else if (taken) {
+                        // Taken by another player — dim + dark overlay + X
+                        g2.setColor(new Color(swatch.getRed(), swatch.getGreen(), swatch.getBlue(), 55));
+                        g2.fillOval(2, 2, 14, 14);
+                        g2.setColor(new Color(0, 0, 0, 140));
+                        g2.fillOval(2, 2, 14, 14);
+                        g2.setColor(new Color(255, 255, 255, 180));
+                        g2.setStroke(new BasicStroke(1.8f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                        g2.drawLine(5, 5, 13, 13);
+                        g2.drawLine(13, 5, 5, 13);
+                    } else {
+                        // Available — normal swatch
+                        g2.setColor(swatch);
+                        g2.fillOval(2, 2, 14, 14);
+                    }
+                }
+            };
+            swatchBtn.setOpaque(false);
+            swatchBtn.setPreferredSize(new Dimension(18, 18));
+            swatchBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+            swatchBtn.addMouseListener(new MouseAdapter() {
+                @Override public void mouseClicked(MouseEvent e) {
+                    if (isColorTaken(chosenIdx)) return; // blocked — color taken
+                    colorMap.put(myPlayerId, chosenIdx);
+                    if (lobbySender != null)
+                        lobbySender.accept(new TcpMessage(MsgType.LOBBY_COLOR_CHANGE, chosenIdx));
+                    playerListPanel.repaint();
+                }
+            });
+            colorRow.add(swatchBtn);
+        }
+
+        JPanel compound = new JPanel();
+        compound.setLayout(new BoxLayout(compound, BoxLayout.Y_AXIS));
+        compound.setOpaque(false);
+        compound.setMaximumSize(new Dimension(Integer.MAX_VALUE, 58));
+        compound.add(nameRow);
+        compound.add(colorRow);
+        return compound;
     }
 
     // ── Config helpers ────────────────────────────────────────────────
@@ -650,10 +737,16 @@ public class SwingUI implements GameUI {
         JPanel gameRoot = new JPanel(new BorderLayout(0, 0));
         gameRoot.setBackground(BG_DARK);
 
-        // ── Top HUD ──────────────────────────────────────────────────
+        // ── Top section: title/timer row + two-row scoreboard ────────
+        JPanel topSection = new JPanel();
+        topSection.setLayout(new BoxLayout(topSection, BoxLayout.Y_AXIS));
+        topSection.setBackground(new Color(0x08081a));
+        topSection.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, BORDER_DIM));
+
+        // Row 1: title (left) + timer (centre)
         JPanel hud = new JPanel(new BorderLayout());
-        hud.setBackground(new Color(0x08081a));
-        hud.setBorder(BorderFactory.createEmptyBorder(6, 16, 6, 16));
+        hud.setOpaque(false);
+        hud.setBorder(BorderFactory.createEmptyBorder(6, 16, 2, 16));
 
         titleLabel = styled("CHRONOARENA", 20, Font.BOLD, ACCENT);
         hud.add(titleLabel, BorderLayout.WEST);
@@ -661,12 +754,24 @@ public class SwingUI implements GameUI {
         timerLabel = styled("03:00", 22, Font.BOLD, TEXT_MAIN);
         timerLabel.setHorizontalAlignment(SwingConstants.CENTER);
         hud.add(timerLabel, BorderLayout.CENTER);
+        topSection.add(hud);
 
-        scorePanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
-        scorePanel.setOpaque(false);
-        hud.add(scorePanel, BorderLayout.EAST);
+        // Score bar: up to 2 rows, each a centred FlowLayout
+        JPanel scoreBar = new JPanel();
+        scoreBar.setLayout(new BoxLayout(scoreBar, BoxLayout.Y_AXIS));
+        scoreBar.setOpaque(false);
+        scoreBar.setBorder(BorderFactory.createEmptyBorder(2, 8, 6, 8));
 
-        gameRoot.add(hud, BorderLayout.NORTH);
+        scoreRow1 = new JPanel(new FlowLayout(FlowLayout.CENTER, 6, 2));
+        scoreRow1.setOpaque(false);
+        scoreRow2 = new JPanel(new FlowLayout(FlowLayout.CENTER, 6, 2));
+        scoreRow2.setOpaque(false);
+        scoreRow2.setVisible(false); // only shown with 5+ players
+        scoreBar.add(scoreRow1);
+        scoreBar.add(scoreRow2);
+        topSection.add(scoreBar);
+
+        gameRoot.add(topSection, BorderLayout.NORTH);
 
         // ── Arena ─────────────────────────────────────────────────────
         arenaPanel = new ArenaPanel();
@@ -674,13 +779,27 @@ public class SwingUI implements GameUI {
         gameRoot.add(arenaPanel, BorderLayout.CENTER);
 
         // ── Bottom status bar ─────────────────────────────────────────
+        JPanel gameFooter = new JPanel(new BorderLayout());
+        gameFooter.setBackground(new Color(0x08081a));
+        gameFooter.setBorder(BorderFactory.createEmptyBorder(4, 12, 4, 12));
+
         JLabel status = styled(
-            "  WASD / Arrows = Move   |   SPACE / F = Freeze-Ray   |   ESC = Quit",
+            "WASD / Arrows = Move   |   SPACE / F = Freeze-Ray   |   ESC = Quit",
             11, Font.PLAIN, TEXT_DIM);
-        status.setBorder(BorderFactory.createEmptyBorder(4, 12, 4, 12));
-        status.setBackground(new Color(0x08081a));
-        status.setOpaque(true);
-        gameRoot.add(status, BorderLayout.SOUTH);
+        gameFooter.add(status, BorderLayout.CENTER);
+
+        JButton gameHelpBtn = new JButton("? HOW TO PLAY");
+        gameHelpBtn.setFont(new Font("Monospaced", Font.BOLD, 11));
+        gameHelpBtn.setForeground(ACCENT);
+        gameHelpBtn.setBackground(new Color(0x08081a));
+        gameHelpBtn.setBorder(BorderFactory.createLineBorder(ACCENT, 1));
+        gameHelpBtn.setFocusPainted(false);
+        gameHelpBtn.setFocusable(false); // prevent spacebar from triggering this button
+        gameHelpBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        gameHelpBtn.addActionListener(e -> showHelpDialog());
+        gameFooter.add(gameHelpBtn, BorderLayout.EAST);
+
+        gameRoot.add(gameFooter, BorderLayout.SOUTH);
 
         return gameRoot;
     }
@@ -701,21 +820,25 @@ public class SwingUI implements GameUI {
         timerLabel.setText(String.format("%02d:%02d", sec / 60, sec % 60));
         timerLabel.setForeground(sec <= 30 ? ACCENT2 : TEXT_MAIN);
 
-        scorePanel.removeAll();
+        scoreRow1.removeAll();
+        scoreRow2.removeAll();
         if (snap.players != null) {
             List<PlayerInfo> sorted = new ArrayList<>(snap.players);
             sorted.sort((a, b) -> b.score - a.score);
-            for (PlayerInfo p : sorted) {
+            for (int i = 0; i < sorted.size(); i++) {
+                PlayerInfo p = sorted.get(i);
                 Color c = playerColor(p.id);
                 JLabel badge = styled(p.name + "  " + p.score, 13, Font.BOLD, c);
                 badge.setBorder(BorderFactory.createCompoundBorder(
                     BorderFactory.createLineBorder(c.darker(), 1),
                     BorderFactory.createEmptyBorder(2, 8, 2, 8)));
-                scorePanel.add(badge);
+                if (i < 4) scoreRow1.add(badge);
+                else       scoreRow2.add(badge);
             }
+            scoreRow2.setVisible(sorted.size() > 4);
         }
-        scorePanel.revalidate();
-        scorePanel.repaint();
+        scoreRow1.revalidate(); scoreRow1.repaint();
+        scoreRow2.revalidate(); scoreRow2.repaint();
     }
 
     private void loadSprites() {
@@ -1012,12 +1135,198 @@ public class SwingUI implements GameUI {
     }
 
     // ═══════════════════════════════════════════════════════════════════
+    //  Help / How-to-Play dialog
+    // ═══════════════════════════════════════════════════════════════════
+
+    private void showHelpDialog() {
+        JDialog dlg = new JDialog(frame, "How to Play — ChronoArena", true);
+        dlg.getContentPane().setBackground(BG_DARK);
+        dlg.setLayout(new BorderLayout());
+
+        // ── Title bar ────────────────────────────────────────────────
+        JLabel title = styled("CHRONOARENA  —  HOW TO PLAY", 18, Font.BOLD, ACCENT);
+        title.setBorder(BorderFactory.createEmptyBorder(18, 24, 10, 24));
+        title.setBackground(new Color(0x08081a));
+        title.setOpaque(true);
+        dlg.add(title, BorderLayout.NORTH);
+
+        // ── Scrollable content ────────────────────────────────────────
+        JPanel content = new JPanel();
+        content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
+        content.setBackground(BG_DARK);
+        content.setBorder(BorderFactory.createEmptyBorder(8, 24, 16, 24));
+
+        // Helper lambdas for adding styled rows
+        Runnable addSep = () -> {
+            JSeparator sep = styledSeparator();
+            sep.setMaximumSize(new Dimension(Integer.MAX_VALUE, 2));
+            content.add(Box.createVerticalStrut(6));
+            content.add(sep);
+            content.add(Box.createVerticalStrut(8));
+        };
+
+        // ── CONTROLS ─────────────────────────────────────────────────
+        content.add(helpSection("CONTROLS"));
+        addSep.run();
+
+        String[][] controls = {
+            { "W / \u2191",       "Move Up" },
+            { "S / \u2193",       "Move Down" },
+            { "A / \u2190",       "Move Left" },
+            { "D / \u2192",       "Move Right" },
+            { "Q",                "Move Up-Left (diagonal)" },
+            { "E",                "Move Up-Right (diagonal)" },
+            { "Z",                "Move Down-Left (diagonal)" },
+            { "C",                "Move Down-Right (diagonal)" },
+            { "SPACE / F",        "Fire Freeze-Ray (if armed)" },
+            { "ESC",              "Quit the game" },
+        };
+        for (String[] row : controls) content.add(helpRow(row[0], row[1]));
+
+        content.add(Box.createVerticalStrut(14));
+
+        // ── POWERUPS ─────────────────────────────────────────────────
+        content.add(helpSection("POWERUPS"));
+        addSep.run();
+
+        content.add(helpPowerupRow("\u2744", WEAPON_CLR,
+            "Freeze Ray (Orange)",
+            "Walk over to pick up. Press SPACE or F to fire — freezes the nearest player within range for a few seconds. The frozen player also loses points!"));
+        content.add(Box.createVerticalStrut(8));
+        content.add(helpPowerupRow("\u25b6", SPEED_CLR,
+            "Speed Boost (Green)",
+            "Walk over to instantly double your movement speed for a short time."));
+        content.add(Box.createVerticalStrut(8));
+        content.add(helpPowerupRow("\u26a1", ENERGY_CLR,
+            "Energy (Gold)",
+            "Walk over to collect. Awards bonus points immediately — no skill required!"));
+
+        content.add(Box.createVerticalStrut(14));
+
+        // ── ZONE RULES ───────────────────────────────────────────────
+        content.add(helpSection("ZONE CONTROL RULES"));
+        addSep.run();
+
+        String[] zoneRules = {
+            "Three zones (A, B, C) are placed around the arena.",
+            "Stand in a zone uncontested — a capture bar fills as you hold it.",
+            "Once captured, you earn points each tick while no enemy is in the zone.",
+            "CONTESTED: two or more players in the same zone — no points and capture pauses.",
+            "Grace Timer: an orange bar shows a brief window after capture during which the",
+            "  zone cannot be stolen — hold your ground to protect it!",
+            "Zone border color shows the current owner. Flashing red = contested.",
+        };
+        for (String line : zoneRules) content.add(helpBullet(line));
+
+        content.add(Box.createVerticalStrut(14));
+
+        // ── GENERAL RULES ────────────────────────────────────────────
+        content.add(helpSection("GENERAL RULES"));
+        addSep.run();
+
+        String[] generalRules = {
+            "The round lasts for the configured duration (default: 3 minutes).",
+            "The player with the most points when the timer hits zero wins.",
+            "Points are EARNED by: holding zones each tick, collecting energy items.",
+            "Points are LOST by: being frozen by another player's Freeze-Ray.",
+            "Collision with a Freeze-Ray deals a tag penalty and freezes you briefly.",
+            "Multiple players can hold items at once — only one weapon fires at a time.",
+            "Choose a unique color in the lobby so teammates can tell you apart!",
+        };
+        for (String line : generalRules) content.add(helpBullet(line));
+
+        JScrollPane scroll = new JScrollPane(content,
+            ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
+            ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
+        scroll.setBorder(BorderFactory.createEmptyBorder());
+        scroll.getViewport().setBackground(BG_DARK);
+        scroll.getVerticalScrollBar().setUnitIncrement(16);
+        dlg.add(scroll, BorderLayout.CENTER);
+
+        // ── Close button ─────────────────────────────────────────────
+        JButton close = new JButton("CLOSE");
+        close.setFont(new Font("Monospaced", Font.BOLD, 13));
+        close.setForeground(BG_DARK);
+        close.setBackground(ACCENT);
+        close.setBorderPainted(false);
+        close.setFocusPainted(false);
+        close.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        close.addActionListener(e -> dlg.dispose());
+
+        JPanel btnRow = new JPanel();
+        btnRow.setBackground(BG_DARK);
+        btnRow.setBorder(BorderFactory.createEmptyBorder(8, 0, 16, 0));
+        btnRow.add(close);
+        dlg.add(btnRow, BorderLayout.SOUTH);
+
+        dlg.setSize(560, 580);
+        dlg.setLocationRelativeTo(frame);
+        dlg.setVisible(true);
+    }
+
+    private JLabel helpSection(String text) {
+        JLabel lbl = styled(text, 13, Font.BOLD, TEXT_MAIN);
+        lbl.setAlignmentX(Component.LEFT_ALIGNMENT);
+        lbl.setBorder(BorderFactory.createEmptyBorder(4, 0, 2, 0));
+        return lbl;
+    }
+
+    private JPanel helpRow(String key, String desc) {
+        JPanel row = new JPanel(new BorderLayout(12, 0));
+        row.setOpaque(false);
+        row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 22));
+        row.setAlignmentX(Component.LEFT_ALIGNMENT);
+        JLabel keyLbl  = styled(String.format("%-14s", key), 12, Font.BOLD, ACCENT);
+        JLabel descLbl = styled(desc, 12, Font.PLAIN, TEXT_DIM);
+        row.add(keyLbl,  BorderLayout.WEST);
+        row.add(descLbl, BorderLayout.CENTER);
+        return row;
+    }
+
+    private JPanel helpPowerupRow(String icon, Color iconColor, String name, String desc) {
+        JPanel row = new JPanel();
+        row.setLayout(new BoxLayout(row, BoxLayout.Y_AXIS));
+        row.setOpaque(false);
+        row.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        JPanel header = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
+        header.setOpaque(false);
+        JLabel iconLbl = styled(icon, 16, Font.BOLD, iconColor);
+        JLabel nameLbl = styled(name, 12, Font.BOLD, iconColor);
+        header.add(iconLbl);
+        header.add(nameLbl);
+        row.add(header);
+
+        JLabel descLbl = styled("   " + desc, 11, Font.PLAIN, TEXT_DIM);
+        descLbl.setAlignmentX(Component.LEFT_ALIGNMENT);
+        row.add(descLbl);
+        return row;
+    }
+
+    private JLabel helpBullet(String text) {
+        JLabel lbl = styled("  \u2022  " + text, 11, Font.PLAIN, TEXT_DIM);
+        lbl.setAlignmentX(Component.LEFT_ALIGNMENT);
+        lbl.setBorder(BorderFactory.createEmptyBorder(1, 0, 1, 0));
+        return lbl;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
     //  Helpers
     // ═══════════════════════════════════════════════════════════════════
 
     private Color playerColor(String playerId) {
         int idx = colorMap.getOrDefault(playerId, 0);
         return PLAYER_COLORS[idx % PLAYER_COLORS.length];
+    }
+
+    /** Returns true if the given colorIndex is already claimed by another player in the lobby. */
+    private boolean isColorTaken(int colorIdx) {
+        LobbyState state = currentLobbyState;
+        if (state == null || state.players == null) return false;
+        for (LobbyPlayerInfo p : state.players) {
+            if (!p.id.equals(myPlayerId) && p.colorIndex == colorIdx) return true;
+        }
+        return false;
     }
 
     private void showNotification(String msg, int durationMs) {

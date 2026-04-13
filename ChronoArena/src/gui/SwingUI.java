@@ -50,6 +50,7 @@ public class SwingUI implements GameUI {
     private static final Color CONTESTED    = new Color(0xff4444, true);
     private static final Color CAPTURE_CLR  = new Color(0x00e5ff, true);
     private static final Color WEAPON_CLR   = new Color(0xff6b35);
+    private static final Color SCORE_STEAL_CLR = new Color(0xce93d8);
     private static final Color ENERGY_CLR   = new Color(0xffd700);
     private static final Color SPEED_CLR    = new Color(0x00ff88);
     private static final Color FROZEN_CLR   = new Color(0x88ccff);
@@ -941,7 +942,10 @@ public class SwingUI implements GameUI {
             long now = System.currentTimeMillis();
             for (ItemInfo item : items) {
                 float pulse = 0.5f + 0.5f * (float) Math.sin(now / 300.0 + item.x);
-                Color base  = item.isWeapon ? WEAPON_CLR : item.isSpeedBoost ? SPEED_CLR : ENERGY_CLR;
+                Color base  = item.isWeapon ? WEAPON_CLR
+                           : item.isSpeedBoost ? SPEED_CLR
+                           : item.isScoreSteal ? SCORE_STEAL_CLR
+                           : ENERGY_CLR;
 
                 RadialGradientPaint glow = new RadialGradientPaint(
                     new Point2D.Float(item.x, item.y), ITEM_R * 2.5f,
@@ -957,7 +961,10 @@ public class SwingUI implements GameUI {
                 g2.setColor(BG_DARK);
                 g2.setFont(new Font("Dialog", Font.BOLD, 10));
                 FontMetrics fm = g2.getFontMetrics();
-                String icon = item.isWeapon ? "\u2744" : item.isSpeedBoost ? "\u25b6" : "\u26a1";
+                String icon = item.isWeapon ? "\u2744"
+                           : item.isSpeedBoost ? "\u25b6"
+                           : item.isScoreSteal ? "\u2620"
+                           : "\u26a1";
                 g2.drawString(icon, item.x - fm.stringWidth(icon)/2, item.y + fm.getAscent()/2 - 1);
             }
         }
@@ -1012,6 +1019,13 @@ public class SwingUI implements GameUI {
                     g2.setColor(BG_DARK);
                     g2.setStroke(new BasicStroke(1));
                     g2.drawOval(p.x + PLAYER_R - 5, p.y - PLAYER_R - 1, 8, 8);
+                }
+                if (p.hasScoreSteal) {
+                    g2.setColor(SCORE_STEAL_CLR);
+                    g2.fillOval(p.x + PLAYER_R - 5, p.y - PLAYER_R + 9, 8, 8);
+                    g2.setColor(BG_DARK);
+                    g2.setStroke(new BasicStroke(1));
+                    g2.drawOval(p.x + PLAYER_R - 5, p.y - PLAYER_R + 9, 8, 8);
                 }
 
                 g2.setFont(new Font("Monospaced", Font.BOLD, 11));

@@ -32,6 +32,7 @@ public class GameState {
     int   POINTS_PER_ZONE_TICK  = Config.getInt("points.per.zone.tick");
     int   ENERGY_VALUE          = Config.getInt("item.energy.value");
     int   TAG_PENALTY           = Config.getInt("tag.penalty.points");
+    int   SCORE_STEAL_AMOUNT    = Config.getInt("score.steal.amount");
     long  GRACE_TIMER_MS        = Config.getLong("grace.timer.ms");
     long  FREEZE_DURATION_MS    = Config.getLong("freeze.duration.ms");
     long  ZONE_CAPTURE_TIME_MS  = Config.getLong("zone.capture.time.ms");
@@ -90,6 +91,7 @@ public class GameState {
             pi.frozen            = p.isFrozen();
             pi.frozenUntilMs     = p.frozenUntilMs;
             pi.hasWeapon         = p.hasWeapon;
+            pi.hasScoreSteal     = p.hasScoreSteal;
             pi.score             = p.score;
             pi.speedBoosted      = p.isSpeedBoosted();
             pi.speedBoostUntilMs = p.speedBoostUntilMs;
@@ -119,6 +121,7 @@ public class GameState {
             ii.y              = item.y;
             ii.isWeapon       = item.isWeapon;
             ii.isSpeedBoost   = item.isSpeedBoost;
+            ii.isScoreSteal   = item.isScoreSteal;
             snap.items.add(ii);
         }
 
@@ -134,7 +137,8 @@ public class GameState {
         final String name;
         int x, y;
         int score         = 0;
-        boolean hasWeapon = false;
+        boolean hasWeapon     = false;
+        boolean hasScoreSteal = false; // score steal weapon
         long frozenUntilMs     = 0;
         long speedBoostUntilMs = 0;
         long lastSeqNum        = -1; // UDP dedup
@@ -194,13 +198,15 @@ public class GameState {
         final int     x, y;
         final boolean isWeapon;
         final boolean isSpeedBoost;
+        final boolean isScoreSteal;
 
-        Item(String id, int x, int y, boolean isWeapon, boolean isSpeedBoost) {
+        Item(String id, int x, int y, boolean isWeapon, boolean isSpeedBoost, boolean isScoreSteal) {
             this.id           = id;
             this.x            = x;
             this.y            = y;
             this.isWeapon     = isWeapon;
             this.isSpeedBoost = isSpeedBoost;
+            this.isScoreSteal = isScoreSteal;
         }
     }
 }

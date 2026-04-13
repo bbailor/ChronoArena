@@ -442,6 +442,15 @@ public class CustomUI implements GameUI {
                     g.setColor(Color.WHITE);
                     g.setFont(new Font("Monospaced", Font.BOLD, 9));
                     g.drawString("❄", ix - 5, iy + 4);
+                } else if (item.isScoreSteal) {
+                    // Score steal: purple circle with skull symbol
+                    g.setColor(new Color(180, 60, 220, 200));
+                    g.fillOval(ix - 11, iy - 11, 22, 22);
+                    g.setColor(new Color(100, 0, 140));
+                    g.drawOval(ix - 11, iy - 11, 22, 22);
+                    g.setColor(Color.WHITE);
+                    g.setFont(new Font("Monospaced", Font.BOLD, 11));
+                    g.drawString("\u2620", ix - 6, iy + 5);
                 } else if (item.isSpeedBoost) {
                     // Speed boost: green circle with arrow symbol
                     g.setColor(new Color(0, 255, 136, 200));
@@ -500,6 +509,14 @@ public class CustomUI implements GameUI {
                     g.setColor(Color.WHITE);
                     g.setFont(new Font("Monospaced", Font.BOLD, 7));
                     g.drawString("❄", px + 5, py - 10);
+                }
+                // Score steal indicator: small purple dot below freeze dot
+                if (p.hasScoreSteal) {
+                    g.setColor(new Color(180, 60, 220));
+                    g.fillOval(px + 4, py - 6, 10, 10);
+                    g.setColor(Color.WHITE);
+                    g.setFont(new Font("Monospaced", Font.BOLD, 7));
+                    g.drawString("\u2620", px + 4, py + 2);
                 }
 
                 // "FROZEN" label above frozen players

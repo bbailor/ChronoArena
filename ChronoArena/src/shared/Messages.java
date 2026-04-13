@@ -17,6 +17,7 @@ public class Messages {
         MOVE_UP, MOVE_DOWN, MOVE_LEFT, MOVE_RIGHT,
         MOVE_UL, MOVE_UR, MOVE_DL, MOVE_DR,   // diagonal
         FREEZE_RAY,                             // use freeze weapon
+        SCORE_STEAL,                            // drain points from nearest opponent
         NONE
     }
 
@@ -137,6 +138,7 @@ public class Messages {
         public boolean frozen;
         public long    frozenUntilMs;
         public boolean hasWeapon;
+        public boolean hasScoreSteal;
         public int     score;
         public boolean speedBoosted;
         public long    speedBoostUntilMs;
@@ -157,5 +159,6 @@ public class Messages {
         public int     x, y;
         public boolean isWeapon;     // true = freeze weapon
         public boolean isSpeedBoost; // true = speed boost (isWeapon must be false)
+        public boolean isScoreSteal; // true = score steal weapon
     }
 }

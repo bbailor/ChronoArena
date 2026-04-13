@@ -157,7 +157,8 @@ public class GameLoop implements Runnable {
             case MOVE_UR:    move(player,  player.speed, -player.speed); break;
             case MOVE_DL:    move(player, -player.speed,  player.speed); break;
             case MOVE_DR:    move(player,  player.speed,  player.speed); break;
-            case FREEZE_RAY: applyFreezeRay(player); break;
+            case FREEZE_RAY:  applyFreezeRay(player);  break;
+            case SCORE_STEAL: applyScoreSteal(player); break;
             default: break;
         }
 
@@ -170,6 +171,35 @@ public class GameLoop implements Runnable {
         int ny = Math.max(0, Math.min(ARENA_H - 20, p.y + dy));
         p.x = nx;
         p.y = ny;
+    }
+
+    // ------------------------------------------------------------------ //
+    //  Score-steal attack logic
+    // ------------------------------------------------------------------ //
+    private void applyScoreSteal(GameState.ServerPlayer attacker) {
+        if (!attacker.hasScoreSteal) return;
+
+        // Find nearest player within the same range as the freeze ray
+        GameState.ServerPlayer target   = null;
+        double                 bestDist = Double.MAX_VALUE;
+
+        for (GameState.ServerPlayer p : state.players.values()) {
+            if (p.id.equals(attacker.id)) continue;
+            double dist = Math.hypot(p.x - attacker.x, p.y - attacker.y);
+            if (dist <= FREEZE_RANGE && dist < bestDist) {
+                bestDist = dist;
+                target   = p;
+            }
+        }
+
+        if (target != null) {
+            int stolen         = Math.min(state.SCORE_STEAL_AMOUNT, target.score);
+            target.score       = Math.max(0, target.score - stolen);
+            attacker.score    += stolen;
+            attacker.hasScoreSteal = false; // consumed on use
+            System.out.println("[GameLoop] " + attacker.name
+                    + " stole " + stolen + " pts from " + target.name);
+        }
     }
 
     // ------------------------------------------------------------------ //
@@ -302,7 +332,10 @@ public class GameLoop implements Runnable {
                 String kind;
                 if (item.isWeapon) {
                     player.hasWeapon = true;
-                    kind = "weapon";
+                    kind = "freeze-ray";
+                } else if (item.isScoreSteal) {
+                    player.hasScoreSteal = true;
+                    kind = "score-steal";
                 } else if (item.isSpeedBoost) {
                     player.speedBoostUntilMs = System.currentTimeMillis() + state.SPEED_BOOST_DURATION_MS;
                     player.speed = player.baseSpeed * state.SPEED_BOOST_MULTIPLIER;
@@ -331,12 +364,17 @@ public class GameLoop implements Runnable {
         int    y    = rng.nextInt(ARENA_H - 40) + 20;
         String id   = "item-" + (++itemCounter);
 
-        int     type         = rng.nextInt(3);
+        int    type          = rng.nextInt(4);
         boolean isWeapon     = (type == 0);
-        boolean isSpeedBoost = (type == 2);
-        String  kindName     = isWeapon ? "weapon" : (isSpeedBoost ? "speed boost" : "energy");
+        boolean isSpeedBoost = (type == 1);
+        boolean isScoreSteal = (type == 2);
+        // type == 3 → energy coin
+        String  kindName     = isWeapon ? "freeze-ray"
+                             : isSpeedBoost ? "speed boost"
+                             : isScoreSteal ? "score-steal"
+                             : "energy";
 
-        state.items.put(id, new GameState.Item(id, x, y, isWeapon, isSpeedBoost));
+        state.items.put(id, new GameState.Item(id, x, y, isWeapon, isSpeedBoost, isScoreSteal));
         System.out.println("[GameLoop] Spawned " + kindName + " at (" + x + "," + y + ")");
     }
 
